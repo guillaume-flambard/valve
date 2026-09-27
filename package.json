@@ -1,0 +1,24 @@
+{
+  "name": "valve",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "bench/*",
+    "trainer/*"
+  ],
+  "scripts": {
+    "build": "tsc -b packages/schema packages/runtime packages/telemetry packages/opencode-adapter packages/jev-adapter",
+    "clean:ts": "tsc -b --clean packages/schema packages/runtime packages/telemetry packages/opencode-adapter packages/jev-adapter",
+    "dev": "tsc -b -w packages/schema packages/runtime packages/telemetry packages/opencode-adapter packages/jev-adapter",
+    "ingest": "node scripts/ingest.mjs",
+    "smoke": "node experiments/smoke-v0.mjs",
+    "test": "node --test experiments/*.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

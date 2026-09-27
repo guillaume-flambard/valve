@@ -1,0 +1,27 @@
+{
+  "name": "@valve/cogbench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "bench": "node dist/cli.js"
+  },
+  "dependencies": {
+    "@valve/schema": "file:../../packages/schema",
+    "@valve/runtime": "file:../../packages/runtime",
+    "@valve/telemetry": "file:../../packages/telemetry"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.5.0"
+  }
+}
