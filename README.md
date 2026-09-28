@@ -19,7 +19,8 @@ What exists:
 | M2 OpenCode shadow observer, spool, ingest, disagreement queries | done |
 | M3 CogBench: real exit codes as the only success signal | done, **negative result** |
 | M4 Outcome-aware state: attempts, checkpoints, verdicts, grounded labels | done |
-| M5 Rejection-aware policy | not started |
+| M5 CogBench families A–H, per-task verification cost, **frozen** | done |
+| M6 Rejection- and value-aware policy | **next, unblocked** |
 
 The two results worth reading before anything else:
 
@@ -29,6 +30,9 @@ The two results worth reading before anything else:
 - **[ADR 0002](docs/decisions/0002-outcome-aware-trajectory-state.md)** — the
   representation, not the policy, was the blocker, and the dataset can now say
   *why* a run went wrong.
+- **[ADR 0003](docs/decisions/0003-cogbench-frozen.md)** — the benchmark now
+  varies the price of verification, includes tasks where *not* verifying is
+  correct, and finds V0 dominated on **both** axes.
 
 ## Overview
 
@@ -242,13 +246,26 @@ node bench/cogbench/dist/cli.js                    # compare policies
 node bench/cogbench/dist/cli.js --spool out.ndjson # also feed the shared reader
 ```
 
-Current result is a **negative finding**, recorded in
-`docs/decisions/0001-cogbench-falsifies-valve-v0.md`: at V0, VALVE costs 50%
-more than doing nothing and solves the same number of tasks, while
-`test-always` is the only policy that solves them. The cause is a missing
-capability, not a mis-tuned weight: V0 has no memory of an edit the oracle
-rejected, so it stacks edits. The bar to beat is `test-always`, not
-`naive-edit-first`.
+Current result is a **negative finding**. V0 is dominated on both axes:
+
+```
+policy             solved  escaped  cost
+verify-always      7/8     0        25,100
+test-always        4/8     3        10,180
+valve-v0           3/8     0        27,920
+stop-immediately   1/8     0        0
+```
+
+`verify-always` is the safety reference: it cannot ship a defect because the
+oracle is the thing it runs. `test-always` is the informative failure: the
+cheapest policy that ships anything, and it escapes 3 defects. The bar is
+`verify-always`'s solved count and zero escaped, at lower cost.
+
+Two channels, priced per task: a cheap partial `testCommand` that can pass on a
+wrong fix, and the complete `verifyCommand` oracle. A `defectEscape` weight
+prices what shipping a missed bug costs, which is what makes skipping
+verification a decision rather than an omission. Utility is compared only within
+a task, because each task prices success differently.
 
 ## Roadmap
 
@@ -257,8 +274,14 @@ rejected, so it stacks edits. The bar to beat is `test-always`, not
 - **M2** ✓ OpenCode shadow observer, spool, ingest, disagreement queries
 - **M3** ✓ CogBench harness + 2 verified fixtures (negative result on V0, ADR 0001)
 - **M4** ✓ Outcome-aware state: attempts, checkpoints, verdicts, graded grounding (ADR 0002)
-- **M5** Rejection-aware policy, now able to read falsified attempts
-- **M6** Task families A-H, so `test-always` is a real safety bar and not an automatic winner
+- **M5** ✓ CogBench families A–H, per-task verification cost, escaped-defect
+  weight. **Frozen** — see ADR 0003. Two fixtures can falsify a policy but cannot
+  establish one, and a benchmark where verifying is almost always right rewards
+  any policy that simply verifies more.
+- **M6** Rejection- and value-aware policy. Reads `falsifiedAttempts` and
+  `unverifiedDelta` for the first time. **The benchmark is frozen: no task or
+  cost change while this is written.** Whether it wins or loses, ADR 0004 is
+  published.
 - **M7** Counterfactual replay from checkpoints
 - **M8** Dataset v1 (100k+ decision points)
 - **M9** VALVE-1: small supervised model, then calibration (ECE, Brier)

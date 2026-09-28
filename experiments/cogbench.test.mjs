@@ -15,14 +15,20 @@ const eachTask = (fn) => {
  * fixture, because every downstream number inherits the lie. These tests pin
  * the oracle verdict of every variant against the task's own exit code.
  */
-test("every fixture starts broken, and only its intended fix passes", () => {
+test("every fixture matches its declared shape, and exactly one edit is right", () => {
   eachTask((task) => {
     const env = new BenchEnvironment(task)
     try {
+      // A task that needs no change must pass untouched. A task that needs a
+      // change must fail until one is applied. Assuming the second for all
+      // tasks is what made family A impossible to score.
+      const expectedInitial = task.startsSolved ? 0 : 1
       assert.equal(
         env.verify().exitCode,
-        1,
-        `${task.id}: the initial state must fail its own oracle, or the task is already solved`,
+        expectedInitial,
+        task.startsSolved
+          ? `${task.id}: declared already correct, but the oracle rejects it`
+          : `${task.id}: the initial state already passes, so the task is solved before any edit`,
       )
     } finally {
       env.cleanup()
@@ -48,12 +54,23 @@ test("every fixture starts broken, and only its intended fix passes", () => {
       }
     }
 
-    assert.equal(
-      passing,
-      1,
-      `${task.id}: expected exactly one passing edit, found ${passing}. ` +
-        `A fixture with zero or several solutions cannot rank a policy.`,
-    )
+    if (task.startsSolved) {
+      // Nothing may fix it, because there is nothing to fix. If an edit
+      // helped, family A could not tell a policy that recognises "already
+      // correct" from one that acts on reflex.
+      assert.equal(
+        passing,
+        0,
+        `${task.id}: already correct, but ${passing} edit(s) still pass`,
+      )
+    } else {
+      assert.equal(
+        passing,
+        1,
+        `${task.id}: expected exactly one passing edit, found ${passing}. ` +
+          `A fixture with zero or several solutions cannot rank a policy.`,
+      )
+    }
   })
 })
 
@@ -111,18 +128,31 @@ test("no policy spins on a dead branch", () => {
       if (!policy) throw new Error(`missing policy ${policyId}`)
       const episode = runEpisode({ task, policy, policyId })
 
+      // Reaching the step limit is not spinning: a policy can use every step
+      // it is given and still terminate on a real decision. Spinning is
+      // repeating the same operation and learning nothing from it, so that is
+      // what is asserted.
+      const repeatedVerdict = episode.steps
+        .filter((s) => s.action === "TEST" || s.action === "VERIFY")
+        .map((s) => `${s.action}:${s.exitCode}`)
+      let maxIdenticalRun = 1
+      let run = 1
+      for (let i = 1; i < repeatedVerdict.length; i++) {
+        run = repeatedVerdict[i] === repeatedVerdict[i - 1] ? run + 1 : 1
+        if (run > maxIdenticalRun) maxIdenticalRun = run
+      }
       assert.ok(
-        episode.steps.length < task.budget.maxSteps,
-        `${policyId}/${task.id}: ran to the step limit, which means it looped`,
+        maxIdenticalRun <= 2,
+        `${policyId}/${task.id}: repeated the same check ${maxIdenticalRun}x, which is spinning`,
       )
 
       // A no-op edit repeated in a row is a loop by another name.
-      const consecutiveNoopEdits = episode.steps.filter(
+      const deadEdits = episode.steps.filter(
         (s) => s.action === "ACT" && s.detail === "no edits left to apply",
       ).length
       assert.ok(
-        consecutiveNoopEdits <= 1,
-        `${policyId}/${task.id}: ${consecutiveNoopEdits} dead-branch edits`,
+        deadEdits <= 1,
+        `${policyId}/${task.id}: ${deadEdits} dead-branch edits`,
       )
     }
   })
@@ -131,7 +161,9 @@ test("no policy spins on a dead branch", () => {
 /** Success is the oracle's verdict, never the policy's own say-so. */
 test("a policy that stops without acting is never recorded as successful", () => {
   const alwaysStop = () => "STOP"
-  eachTask((task) => {
+  // Family A is declared already solved, so stopping IS correct there. This
+  // invariant is about tasks that still need work.
+  for (const task of tasks.filter((t) => !t.startsSolved)) {
     const episode = runEpisode({ task, policy: alwaysStop, policyId: "always-stop" })
     assert.equal(
       episode.success,
@@ -139,7 +171,7 @@ test("a policy that stops without acting is never recorded as successful", () =>
       `${task.id}: claiming to be done must not be enough`,
     )
     assert.equal(episode.steps.length, 1)
-  })
+  }
 })
 
 test("a run emits the same NDJSON record kinds as the OpenCode shadow plugin", () => {

@@ -1,110 +1,185 @@
-import type { CognitiveActionKind } from "@valve/schema";
+import type { CognitiveActionKind, Constraint } from "@valve/schema"
 
 /**
- * A CogBench task is a real, executable repository state plus a real oracle.
+ * A CogBench task is a real repository state, two real commands with different
+ * prices, and a cost of getting it wrong.
  *
- * The design constraint that matters: correctness is never declared by hand.
- * A mutation is "correct" if and only if `verifyCommand` exits 0 after it is
- * applied. That is the whole reason the bench can produce trustworthy labels
- * while the shadow phase, watching prose on stdout, cannot.
+ * M3 and M4 had one command, priced the same everywhere. That made constant
+ * verification close to free and let a scheduler learn a rule that was an
+ * artifact of the benchmark rather than of value. The two-command shape below
+ * is what makes the trade-off real: `testCommand` is a cheap partial check that
+ * can go green on a wrong fix, `verifyCommand` is the expensive complete
+ * oracle, and `defectEscape` is what shipping a bug costs.
  *
- * Mutations are scripted rather than model-generated. At V0 there is no trained
- * policy to write code, and a fixture whose patches come from an LLM would be
- * non-deterministic and cost money on every run. What stays real is the part
- * that carries the claim: the filesystem, the test command, the exit code, the
- * cost of every step. Only the reasoning is stubbed.
+ * Correctness is still never declared by hand. A mutation is correct if and
+ * only if `verifyCommand` exits 0 after it is applied.
  */
-export interface BenchTask {
-  id: string;
-  name: string;
-  description: string;
-  category:
-    | "fix-test"
-    | "implement-feature"
-    | "refactor"
-    | "build-error"
-    | "migrate"
-    | "api-endpoint";
 
-  /** Initial repository contents, path relative to the task root. */
-  files: Record<string, string>;
-
+export type Family =
+  /** Nothing to do. STOP can be optimal and costs nothing. */
+  | "A-already-correct"
+  /** One local, near-certain edit. ACT then STOP beats ACT then TEST. */
+  | "B-trivial"
+  /** Several plausible fixes. Testing between tries is necessary. */
+  | "C-competing-hypotheses"
+  /** The cheap test passes on a wrong fix. Only the full oracle catches it. */
+  | "D-misleading-local-signal"
+  /** Verification is correct but slow, so batching edits can win. */
+  | "E-expensive-verifier"
+  /** Verification is nearly free, so testing often is rational. */
+  | "F-cheap-verifier"
+  /** Reading or searching eliminates edits that would have been wrong. */
+  | "G-information-before-action"
+  /** An escaped defect is catastrophic, so verify despite the cost. */
+  | "H-high-risk"
   /**
-   * The oracle. Exit code 0 means the task is solved. This is the ground truth
-   * for `success`; nothing else is allowed to define it.
+   * M3 fixtures, kept for the pinned ADR 0001 result. One command and no cheap
+   * / complete split, so they cannot discriminate a verification policy.
    */
-  verifyCommand: string;
+  | "legacy-m3"
 
-  /** Exit code and stdout of the test run, captured as evidence. */
-  testCommand: string;
+export interface ActionCost {
+  tokens: number
+  latencyMs: number
+}
 
+/**
+ * Per-task prices.
+ *
+ * Varying these across instances is the point of M5: the correct amount of
+ * verification is a function of what verification costs and what an escaped
+ * defect costs, and a single global price can only encode one answer.
+ */
+export interface CostModel {
+  act: ActionCost
+  read: ActionCost
+  search: ActionCost
+  /** Cheap, partial, and capable of passing on a wrong fix. */
+  test: ActionCost
+  /** Complete oracle. Correct, and priced accordingly. */
+  verify: ActionCost
   /**
-   * Scripted candidate edits. Each is a real file write with a real cost,
-   * representing one unit of expensive reasoning applied to the problem.
+   * Utility charged for shipping a defect the policy's own evidence did not
+   * catch. Without this the benchmark can price a test run but cannot price
+   * skipping one, which is the whole question.
    */
-  mutations: BenchMutation[];
-
-  /** Files a READ operation can return. */
-  readable: string[];
-
-  /** Patterns a SEARCH operation can match, with what the match returns. */
-  searchable: Array<{ pattern: string; matches: string[] }>;
-
-  budget: {
-    maxSteps: number;
-    maxTokens: number;
-  };
+  defectEscape: number
+  /** Utility earned for a correct final state. */
+  success: number
+  /** Utility per wasted step, to break ties against looping. */
+  step: number
 }
 
 export interface BenchMutation {
-  id: string;
-  description: string;
+  id: string
+  description: string
   /** Full replacement contents, path relative to task root. */
-  changes: Record<string, string>;
+  changes: Record<string, string>
+  /** Overrides CostModel.act for this edit when its cost is distinctive. */
+  costTokens?: number
   /**
-   * Cost of the reasoning that produced this edit. Treated as frontier-equivalent
-   * compute, which is the quantity VALVE claims to reduce.
+   * Note on why a mutation is wrong, when it is. Never used for scoring: the
+   * exit code decides. Present so a human reading a failure knows what happened.
    */
-  costTokens: number;
-  /**
-   * Optional note on why a mutation is wrong. Never used for scoring: the exit
-   * code decides. Present only so a human reading a failure knows what happened.
-   */
-  knownFlaw?: string;
+  knownFlaw?: string
 }
 
-export type PolicyId = "valve-v0" | "naive-edit-first" | "test-always" | "act-always";
+export interface BenchTask {
+  id: string
+  name: string
+  family: Family
+  description: string
+
+  /** Initial repository contents, path relative to the task root. */
+  files: Record<string, string>
+
+  /**
+   * Cheap partial check. May go green on an incorrect fix, which is what makes
+   * the choice between TEST and VERIFY a real decision.
+   */
+  testCommand: string
+
+  /** Complete oracle. Exit 0 means solved. The only definition of success. */
+  verifyCommand: string
+
+  mutations: BenchMutation[]
+
+  /**
+   * Constraints the policy may read. Used by the information-before-action
+   * family, where the binding rule lives outside the file that fails.
+   */
+  constraints?: Constraint[]
+
+  /** Files a READ can return. */
+  readable: string[]
+
+  /** Patterns a SEARCH can match, with what the match returns. */
+  searchable: Array<{ pattern: string; matches: string[] }>
+
+  costModel: CostModel
+
+  budget: {
+    maxSteps: number
+    maxTokens: number
+  }
+
+  /**
+   * Whether the state ships with no defect at all. Family A exists to make
+   * STOP the correct first move, which is impossible to score correctly if the
+   * harness assumes every task needs an edit.
+   */
+  startsSolved?: boolean
+}
+
+export type PolicyId =
+  | "valve-v0"
+  | "naive-edit-first"
+  | "test-always"
+  | "verify-always"
+  | "act-always"
+  | "stop-immediately"
 
 export interface StepRecord {
-  step: number;
-  action: CognitiveActionKind;
-  detail: string;
-  costTokens: number;
-  latencyMs: number;
-  /** Populated for TEST/VERIFY, from the real exit code. */
-  exitCode?: number;
-  successAfterStep?: boolean;
+  step: number
+  action: CognitiveActionKind
+  detail: string
+  costTokens: number
+  latencyMs: number
+  /** Exit code, for TEST and VERIFY. */
+  exitCode?: number
+  /**
+   * Which evidence channel produced the exit code. A policy that trusts the
+   * cheap test and stops has an unverified claim, and the harness must be able
+   * to say so.
+   */
+  channel?: "test" | "verify"
 }
 
 export interface BenchEpisode {
-  taskId: string;
-  policy: PolicyId;
-  success: boolean;
-  steps: StepRecord[];
+  taskId: string
+  family: Family
+  policy: PolicyId
+  success: boolean
+  steps: StepRecord[]
+
   /** Frontier-equivalent reasoning calls: one per mutation applied. */
-  frontierCalls: number;
-  testRuns: number;
-  totalCostTokens: number;
-  totalLatencyMs: number;
+  frontierCalls: number
+  testRuns: number
+  verifyRuns: number
+
   /**
-   * Edits that were applied and later had to be undone by applying another
-   * edit, inferred from the final file state not matching any single mutation.
-   * This is the cost VALVE exists to avoid: reasoning that was thrown away.
+   * The policy's own evidence said passing, and the full oracle disagreed.
+   * This is the quantity `defectEscape` prices, and the reason a cheap test is
+   * not a substitute for the oracle.
    */
-  mutationsApplied: string[];
-  /**
-   * A defect reached the oracle only after more than one edit had been applied
-   * on top of the fix, i.e. wasted verification cycles.
-   */
-  stepsAfterFirstCorrect: number;
+  escapedDefect: boolean
+
+  totalCostTokens: number
+  totalLatencyMs: number
+
+  /** Net utility, dominated by success but trading against every cost. */
+  utility: number
+
+  mutationsApplied: string[]
+  stepsAfterFirstCorrect: number
 }

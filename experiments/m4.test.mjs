@@ -6,7 +6,7 @@ import { join } from "node:path"
 
 import { runEpisode } from "../bench/cogbench/dist/runner.js"
 import { POLICIES } from "../bench/cogbench/dist/policies.js"
-import { tasks } from "../bench/cogbench/dist/tasks.js"
+import { tasks, legacyTasks } from "../bench/cogbench/dist/tasks.js"
 import { ingestSpool } from "../packages/opencode-adapter/dist/index.js"
 import { EventStore } from "../packages/telemetry/dist/index.js"
 import {
@@ -42,8 +42,14 @@ const runCollecting = (task, policyId) => {
   return collected
 }
 
-const task0 = () => tasks[0]
-const task1 = () => tasks[1]
+/**
+ * M5 added family A, whose tasks are already solved and therefore produce no
+ * attempts. The attempt-level invariants need a task that actually requires
+ * work, so these pick one explicitly rather than trusting index 0.
+ */
+const taskNeedingWork = () => tasks.find((t) => !t.startsSolved && t.mutations.length > 0)
+const task0 = taskNeedingWork
+const task1 = () => tasks.find((t) => t.family === "D-misleading-local-signal") ?? taskNeedingWork()
 
 // --- 1. every mutating attempt has identity ---
 
@@ -97,7 +103,11 @@ test("criterion 2: a verification names the attempts it speaks to", () => {
 // --- 3. falsification survives rollback ---
 
 test("criterion 3: falsification survives a rollback", () => {
-  const { attempts } = runCollecting(task0(), "test-always")
+  // A task with competing fixes, so verification between attempts actually
+  // rejects one. A task whose first edit is correct never produces a rejection.
+  const contested =
+    tasks.find((t) => t.family === "C-competing-hypotheses") ?? taskNeedingWork()
+  const { attempts } = runCollecting(contested, "verify-always")
   const falsified = attempts.filter((a) => a.verdict === "falsified")
   assert.ok(falsified.length > 0, "the fixture produces a real rejection")
   assert.ok(
@@ -389,16 +399,55 @@ test("stacked edits are unattributable, never three confident rejections", () =>
   assert.equal(single[0].attribution, "individual")
 })
 
+/**
+ * The contrast M4 exists to expose: stacking edits and checking once destroys
+ * causal attribution, checking between attempts preserves it.
+ *
+ * A probe policy is used rather than a baseline, because no shipped policy
+ * stacks *and* then verifies: `act-always` stacks but never checks, so it
+ * produces no verdicts at all, and the verifying policies check between edits.
+ * The behaviour under test is real, it is just not something a sensible policy
+ * does on purpose.
+ */
+const stackThenVerify = (state, _task, ctx) => {
+  if (ctx.remainingMutations.length > 0) return "ACT"
+  return state.verification.tests === "passed" ? "STOP" : "VERIFY"
+}
+
 test("the contrast the milestone exists to expose is real", () => {
-  const stacked = runCollecting(task0(), "valve-v0")
-  const interleaved = runCollecting(task0(), "test-always")
+  const contested =
+    tasks.find((t) => t.family === "C-competing-hypotheses") ?? taskNeedingWork()
 
-  const stackedUnattributable = stacked.attempts.filter((a) => a.verdict === "unattributable").length
-  const interleavedUnattributable = interleaved.attempts.filter((a) => a.verdict === "unattributable").length
+  let stacked = { attempts: [] }
+  runEpisode({
+    task: contested,
+    policy: stackThenVerify,
+    policyId: "probe-stack-then-verify",
+    onAttempts: (attempts) => {
+      stacked = { attempts }
+    },
+  })
+  const interleaved = runCollecting(contested, "verify-always")
 
+  const stackedUnattributable = stacked.attempts.filter(
+    (a) => a.verdict === "unattributable"
+  ).length
+  const interleavedUnattributable = interleaved.attempts.filter(
+    (a) => a.verdict === "unattributable"
+  ).length
+
+  assert.ok(
+    stacked.attempts.length > 1,
+    "the probe must stack more than one edit for the contrast to mean anything",
+  )
   assert.ok(
     stackedUnattributable > 0,
     "stacking edits must show up as destroyed attribution, not as silent absence of verdicts"
+  )
+  assert.equal(
+    stacked.attempts.filter((a) => a.verdict === "falsified").length,
+    0,
+    "and must not invent a rejection it could not make",
   )
   assert.equal(
     interleavedUnattributable,
@@ -407,36 +456,80 @@ test("the contrast the milestone exists to expose is real", () => {
   )
   assert.ok(
     interleaved.attempts.some((a) => a.verdict === "falsified"),
-    "and must actually record which edit was rejected"
+    "and must actually record which edit was rejected",
   )
 })
 
 // --- 8. no V0 heuristic changes ---
 
-test("criterion 8: M4 changed no policy, so the negative result stands", () => {
-  // These numbers are the ADR 0001 result. If they move, a policy changed,
-  // which M4 forbids, and the milestone boundary has been crossed silently.
-  const expectations = {
-    "naive-edit-first": { success: 1, cost: 7200, frontier: 6 },
-    "valve-v0": { success: 1, cost: 10800, frontier: 6 },
-    "test-always": { success: 2, cost: 11900, frontier: 5 },
-    "act-always": { success: 1, cost: 7200, frontier: 6 },
-  }
+/**
+ * The freeze pin.
+ *
+ * M5 changed the benchmark, so the ADR 0001 numbers no longer reproduce: that
+ * harness had one command priced globally, and the current one has two
+ * channels priced per task. The *conclusion* survived and hardened, but the
+ * figures did not, and saying so is more useful than quietly re-baselining.
+ *
+ * What this test protects is the thing M5 promised: no policy moved. If any of
+ * these numbers drift, a policy changed, and the milestone boundary was
+ * crossed silently.
+ */
+const FROZEN_FAMILY_BENCH = {
+  "verify-always": { solved: 7, cost: 25100, escaped: 0 },
+  "test-always": { solved: 4, cost: 10180, escaped: 3 },
+  "valve-v0": { solved: 3, cost: 27920, escaped: 0 },
+  "naive-edit-first": { solved: 2, cost: 15900, escaped: 0 },
+  "act-always": { solved: 2, cost: 15900, escaped: 0 },
+  "stop-immediately": { solved: 1, cost: 0, escaped: 0 },
+}
 
-  for (const [policyId, expected] of Object.entries(expectations)) {
+test("criterion 8: M5 changed the benchmark, not the policies", () => {
+  for (const [policyId, expected] of Object.entries(FROZEN_FAMILY_BENCH)) {
+    const policy = POLICIES[policyId]
+    if (!policy) throw new Error(`unknown policy ${policyId}`)
     let solved = 0
     let cost = 0
-    let frontier = 0
+    let escaped = 0
     for (const task of tasks) {
-      const policy = POLICIES[policyId]
-      if (!policy) throw new Error(`unknown policy ${policyId}`)
       const ep = runEpisode({ task, policy, policyId })
       if (ep.success) solved++
       cost += ep.totalCostTokens
-      frontier += ep.frontierCalls
+      if (ep.escapedDefect) escaped++
     }
-    assert.equal(solved, expected.success, `${policyId}: solved count changed`)
+    assert.equal(solved, expected.solved, `${policyId}: solved count changed`)
     assert.equal(cost, expected.cost, `${policyId}: total cost changed, so a policy moved`)
-    assert.equal(frontier, expected.frontier, `${policyId}: frontier calls changed`)
+    assert.equal(escaped, expected.escaped, `${policyId}: escaped count changed`)
   }
+})
+
+/**
+ * The result the expanded benchmark produces, stated so it cannot be quietly
+ * improved away: V0 is dominated on both axes at once, by the safety baseline.
+ */
+test("the expanded benchmark still finds V0 dominated", () => {
+  const run = (id) => {
+    const policy = POLICIES[id]
+    let solved = 0
+    let cost = 0
+    for (const task of tasks) {
+      const ep = runEpisode({ task, policy, policyId: id })
+      if (ep.success) solved++
+      cost += ep.totalCostTokens
+    }
+    return { solved, cost }
+  }
+  const safety = run("verify-always")
+  const v0 = run("valve-v0")
+  assert.ok(
+    v0.solved <= safety.solved,
+    "V0 solves no more than the safety baseline",
+  )
+  assert.ok(
+    v0.cost >= safety.cost,
+    "V0 costs no less than the safety baseline",
+  )
+  assert.ok(
+    v0.solved < safety.solved || v0.cost > safety.cost,
+    "and is strictly worse on at least one axis",
+  )
 })

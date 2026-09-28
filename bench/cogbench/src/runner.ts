@@ -1,13 +1,5 @@
-import type {
-  CognitiveAction,
-  CognitiveActionKind,
-  CognitiveState,
-  Evidence,
-  Uncertainty,
-  ActionSummary,
-  VerificationStatus,
-} from "@valve/schema"
 import { BenchEnvironment } from "./environment.js"
+import type { ActionSummary, CognitiveActionKind, CognitiveState, Constraint } from "@valve/schema"
 import {
   attributeVerdict,
   checkpointOf,
@@ -15,67 +7,75 @@ import {
   type Attempt,
   type Verification,
 } from "@valve/schema"
-import type { BenchTask, BenchMutation, StepRecord, PolicyId, BenchEpisode } from "./types.js"
+import type {
+  ActionCost,
+  BenchEpisode,
+  BenchMutation,
+  BenchTask,
+  PolicyId,
+  StepRecord,
+} from "./types.js"
 
-// Re-exported so callers can treat `runner` as the single entry point for the
-// bench surface, and so policy modules have one import to reach for.
-export type { BenchTask, BenchMutation, StepRecord, PolicyId, BenchEpisode }
+// Re-exported so the CLI and policies have one import for the bench surface.
+export type { BenchEpisode, BenchTask, PolicyId, StepRecord, BenchMutation }
+export { CANDIDATES } from "./candidates.js"
 
-const CANDIDATE_COSTS: Record<CognitiveActionKind, { tokens: number; latencyMs: number }> = {
-  ACT: { tokens: 1200, latencyMs: 1500 },
-  READ: { tokens: 60, latencyMs: 120 },
-  SEARCH: { tokens: 250, latencyMs: 900 },
-  TEST: { tokens: 900, latencyMs: 1200 },
-  VERIFY: { tokens: 700, latencyMs: 900 },
-  REASON_FAST: { tokens: 800, latencyMs: 800 },
-  REASON_DEEP: { tokens: 4000, latencyMs: 4000 },
-  DELEGATE: { tokens: 2000, latencyMs: 2000 },
-  ASK_HUMAN: { tokens: 0, latencyMs: 2000 },
-  STOP: { tokens: 0, latencyMs: 0 },
+export interface ObservedSink {
+  write(record: Record<string, unknown>): void
 }
-
-export const CANDIDATES: CognitiveAction[] = (
-  Object.keys(CANDIDATE_COSTS) as CognitiveActionKind[]
-).map((kind) => ({
-  kind,
-  estimatedCost: CANDIDATE_COSTS[kind].tokens,
-  estimatedLatencyMs: CANDIDATE_COSTS[kind].latencyMs,
-  reversible: kind !== "ACT" && kind !== "DELEGATE",
-}))
-
-/**
- * Policies are the thing being compared. Each one is a function from state to
- * the next operation, and nothing else about the loop differs between them, so
- * any difference in the results is attributable to the decision policy rather
- * than to the harness.
- */
-export type Policy = (state: CognitiveState, task: BenchTask, ctx: PolicyContext) => CognitiveActionKind
 
 export interface PolicyContext {
-  /** Mutations not yet applied, in fixture order. */
   remainingMutations: BenchMutation[]
-  /** Files already read this episode. */
   readFiles: Set<string>
+  searchedPatterns: Set<string>
   step: number
+  /** Exit code of the most recent TEST, if any. */
+  lastTestExit?: number
+  /** Exit code of the most recent VERIFY, if any. */
+  lastVerifyExit?: number
 }
+
+export type Policy = (
+  state: CognitiveStateLike,
+  task: BenchTask,
+  ctx: PolicyContext
+) => CognitiveActionKind
+
+/**
+ * Policies receive a real CognitiveState.
+ *
+ * An earlier version passed a structural subset cast through `never`, which
+ * typechecked and then crashed at the first heuristic that read
+ * `uncertainties`. The cast hid a genuine contract violation: VALVE needs the
+ * whole state, and a benchmark that quietly supplies less would be measuring a
+ * policy that cannot exist in production.
+ */
+export type CognitiveStateLike = CognitiveState
 
 export interface RunOptions {
   task: BenchTask
   policy: Policy
   policyId: PolicyId
-  /** Records the same NDJSON the OpenCode shadow plugin emits. */
   spool?: ObservedSink
   maxSteps?: number
-  /**
-   * M4: receives the attempt history of the episode. The bench is the only
-   * emitter that can produce real checkpoints and exit codes, so it is the
-   * only source of grounded attempt identity.
-   */
   onAttempts?: (attempts: Attempt[], verifications: Verification[]) => void
 }
 
-export interface ObservedSink {
-  write(record: Record<string, unknown>): void
+function costFor(task: BenchTask, action: CognitiveActionKind): ActionCost {
+  switch (action) {
+    case "ACT":
+      return task.costModel.act
+    case "READ":
+      return task.costModel.read
+    case "SEARCH":
+      return task.costModel.search
+    case "TEST":
+      return task.costModel.test
+    case "VERIFY":
+      return task.costModel.verify
+    default:
+      return { tokens: 0, latencyMs: 0 }
+  }
 }
 
 export function runEpisode(options: RunOptions): BenchEpisode {
@@ -88,26 +88,30 @@ export function runEpisode(options: RunOptions): BenchEpisode {
   const mutationsApplied: string[] = []
   const readFiles = new Set<string>()
   const searchedPatterns = new Set<string>()
-  const evidence: Evidence[] = []
-  const recentActions: ActionSummary[] = []
-  const uncertainties: Uncertainty[] = []
+  const evidence: Array<{ id: string; source: string; content: string; relevance: number; timestamp: number }> = []
+  const recentActions: CognitiveStateLike["recentActions"] = []
 
-  let verification: VerificationStatus = { build: "unknown", tests: "unknown", qa: "unknown" }
+  let verification: CognitiveStateLike["verification"] = { build: "unknown", tests: "unknown", qa: "unknown" }
   let testRuns = 0
+  let verifyRuns = 0
+  let frontierCalls = 0
   let totalCostTokens = 0
   let totalLatencyMs = 0
-  let frontierCalls = 0
   let remaining = [...task.mutations]
   let firstCorrectStep: number | null = null
   let step = 0
   const maxSteps = options.maxSteps ?? task.budget.maxSteps
 
-  // M4: the epistemology. Attempts carry identity and survive verification;
-  // verifications name what they speak to.
+  // The two channels are tracked separately, because a green cheap test and a
+  // green oracle are different claims and only one of them is the oracle.
+  let lastTestExit: number | undefined
+  let lastVerifyExit: number | undefined
+  /** The policy's own belief that it was done, and on what evidence. */
+  let believedPassing = false
+  let believedOnCheapEvidence = false
+
   let attempts: Attempt[] = []
   const verifications: Verification[] = []
-  // A box, because the verified checkpoint advances mid-episode when the
-  // oracle goes green and the loop body needs to write it.
   const verifiedCheckpointRef = { value: checkpointOf(task.files) }
   let currentCheckpoint = verifiedCheckpointRef.value
   const attemptedFiles: Record<string, string> = { ...task.files }
@@ -122,26 +126,31 @@ export function runEpisode(options: RunOptions): BenchEpisode {
 
     const state = buildState({
       task,
-      goal: task.description,
       step,
       evidence,
-      uncertainties,
       recentActions,
       verification,
-      remainingMutations: remaining,
       elapsedMs: Date.now() - startedAt,
       verifiedCheckpoint: verifiedCheckpointRef.value,
       currentCheckpoint,
       attempts,
     })
 
-    const ctx: PolicyContext = { remainingMutations: remaining, readFiles, step }
+    const ctx: PolicyContext = {
+      remainingMutations: remaining,
+      readFiles,
+      searchedPatterns,
+      step,
+      lastTestExit,
+      lastVerifyExit,
+    }
     const action = policy(state, task, ctx)
 
-    const cost = CANDIDATE_COSTS[action]
+    const cost = costFor(task, action)
     const started = Date.now()
     let detail = ""
     let exitCode: number | undefined
+    let channel: "test" | "verify" | undefined
     let mutated = false
     let noProgress = false
 
@@ -150,14 +159,9 @@ export function runEpisode(options: RunOptions): BenchEpisode {
         const mutation = remaining.shift()
         if (!mutation) {
           detail = "no edits left to apply"
-          // An edit with nothing to apply cannot make progress. Ending the
-          // episode here is what stops a policy from spinning forever on a
-          // dead branch, which is the exact failure this project exists to
-          // prevent and the one the naive policy fell into.
           noProgress = true
           break
         }
-        // The state this attempt is made from, captured before the write.
         const baseCheckpoint = currentCheckpoint
         env.applyMutation(mutation)
         const after: Record<string, string> = { ...attemptedFiles }
@@ -168,7 +172,8 @@ export function runEpisode(options: RunOptions): BenchEpisode {
         mutationsApplied.push(mutation.id)
         remaining = remaining.filter((m) => m.id !== mutation.id)
         frontierCalls++
-        totalCostTokens += mutation.costTokens
+        const editCost = mutation.costTokens ?? cost.tokens
+        totalCostTokens += editCost
         mutated = true
         detail = `applied ${mutation.id}`
 
@@ -178,8 +183,8 @@ export function runEpisode(options: RunOptions): BenchEpisode {
           episodeId,
           cognitiveAction: {
             kind: "ACT",
-            estimatedCost: mutation.costTokens,
-            estimatedLatencyMs: 0,
+            estimatedCost: editCost,
+            estimatedLatencyMs: cost.latencyMs,
             reversible: true,
           },
           baseCheckpoint,
@@ -191,64 +196,50 @@ export function runEpisode(options: RunOptions): BenchEpisode {
           evidence: [],
           verifiedBy: [],
           reverted: false,
-          costTokens: mutation.costTokens,
-          // The harness executed the edit, so both the operation and the
-          // resulting state are facts rather than classifications.
+          costTokens: editCost,
           grounding: "harness",
           provenance: "harness",
         }
         attempts = [...attempts, attempt]
-        for (const a of attempts) {
-          if (a.verdict === "pending" && a.id !== attempt.id) {
-            a.verifiedBy = [...a.verifiedBy, attempt.id]
-          }
-        }
+        // Recorded so a policy can see that the world moved. Without this the
+        // only edit-aware signal is the attempt table, and policies fall back
+        // to guessing from ordering.
         recentActions.push({
           action: "ACT",
           timestamp: Date.now(),
           outcome: "success",
-          cost: mutation.costTokens,
-          latencyMs: 0,
-          progressDelta: 0,
+          cost: editCost,
+          latencyMs: cost.latencyMs,
           attemptId: attempt.id,
         })
+        // Any edit invalidates the earlier green evidence it was based on.
+        believedPassing = false
+        believedOnCheapEvidence = false
         break
       }
-      case "TEST":
-      case "VERIFY": {
+      case "TEST": {
         const result = env.test()
         testRuns++
         exitCode = result.exitCode
-        verification = {
-          ...verification,
-          tests: result.exitCode === 0 ? "passed" : result.timedOut ? "unknown" : "failed",
-          build: action === "VERIFY" ? (result.exitCode === 0 ? "passed" : "failed") : verification.build,
-        }
-        detail = result.exitCode === 0 ? "tests passed" : `tests failed (exit ${result.exitCode})`
-
-        // A verification names the attempts it can speak to. Stacked edits are
-        // all named, and attribution below records that none of them can be
-        // singled out rather than inventing three confident verdicts.
-        const pendingIds = attempts.filter((a) => a.verdict === "pending").map((a) => a.id)
-        const record: Verification = {
-          id: `${episodeId}-v${verifications.length + 1}`,
-          step,
-          episodeId,
-          targets: pendingIds,
-          command: task.testCommand,
-          exitCode: result.exitCode,
-          checkpoint: currentCheckpoint,
-          provenance: "harness",
-          grounded: !result.timedOut,
-          timedOut: result.timedOut,
-        }
-        verifications.push(record)
-        attempts = attributeVerdict(attempts, record, result.exitCode === 0)
-        if (result.exitCode === 0 && !result.timedOut) {
-          // Green oracle, so the current state becomes the known-good
-          // checkpoint. This is what clears the unverified delta.
-          verifiedCheckpointRef.value = currentCheckpoint
-        }
+        channel = "test"
+        lastTestExit = result.exitCode
+        verification = { ...verification, tests: result.exitCode === 0 ? "passed" : "failed" }
+        detail = result.exitCode === 0 ? "local test passed" : `local test failed (exit ${result.exitCode})`
+        believedPassing = result.exitCode === 0
+        believedOnCheapEvidence = result.exitCode === 0
+        break
+      }
+      case "VERIFY": {
+        const result = env.verify()
+        verifyRuns++
+        exitCode = result.exitCode
+        channel = "verify"
+        lastVerifyExit = result.exitCode
+        verification = { ...verification, tests: result.exitCode === 0 ? "passed" : "failed" }
+        detail = result.exitCode === 0 ? "oracle passed" : `oracle failed (exit ${result.exitCode})`
+        // The oracle is the only channel that may clear the belief.
+        believedPassing = result.exitCode === 0
+        believedOnCheapEvidence = false
         break
       }
       case "READ": {
@@ -256,13 +247,7 @@ export function runEpisode(options: RunOptions): BenchEpisode {
         if (path) {
           readFiles.add(path)
           const contents = env.read(path) ?? ""
-          evidence.push({
-            id: `ev-${path}`,
-            source: "file",
-            content: contents.slice(0, 2000),
-            relevance: 0.8,
-            timestamp: Date.now(),
-          })
+          evidence.push({ id: `ev-${path}`, source: "file", content: contents.slice(0, 2000), relevance: 0.8, timestamp: Date.now() })
           detail = `read ${path}`
         } else {
           detail = "nothing left to read"
@@ -270,18 +255,10 @@ export function runEpisode(options: RunOptions): BenchEpisode {
         break
       }
       case "SEARCH": {
-        // Tracked in a local set rather than by inspecting ActionSummary, which
-        // carries no free-form detail field.
         const spec = task.searchable.find((s) => !searchedPatterns.has(s.pattern))
         if (spec) {
           searchedPatterns.add(spec.pattern)
-          evidence.push({
-            id: `ev-search-${spec.pattern}`,
-            source: "search",
-            content: spec.matches.join("\n"),
-            relevance: 0.7,
-            timestamp: Date.now(),
-          })
+          evidence.push({ id: `ev-search-${spec.pattern}`, source: "search", content: spec.matches.join("\n"), relevance: 0.7, timestamp: Date.now() })
           detail = `search ${spec.pattern}`
         } else {
           detail = "nothing left to search"
@@ -300,83 +277,84 @@ export function runEpisode(options: RunOptions): BenchEpisode {
     totalLatencyMs += latencyMs
     if (action !== "ACT") totalCostTokens += cost.tokens
 
-    // Uncertainty is recomputed from the real verification status rather than
-    // accumulated, so a stale uncertainty cannot outlive the evidence.
-    uncertainties.length = 0
-    if (verification.tests === "failed") {
-      uncertainties.push({
-        id: "u-tests",
-        description: "tests failing",
-        severity: 0.9,
-        relatedActions: ["ACT", "READ", "TEST"],
-      })
-    } else if (verification.tests === "unknown") {
-      uncertainties.push({
-        id: "u-unverified",
-        description: "changes not yet verified",
-        severity: 0.7,
-        relatedActions: ["TEST", "VERIFY"],
+    if (channel) {
+      const pendingIds = attempts.filter((a) => a.verdict === "pending").map((a) => a.id)
+      const record: Verification = {
+        id: `${episodeId}-v${verifications.length + 1}`,
+        step,
+        episodeId,
+        targets: pendingIds,
+        command: channel === "test" ? task.testCommand : task.verifyCommand,
+        exitCode: exitCode ?? 1,
+        checkpoint: currentCheckpoint,
+        // A cheap local test is grounded but partial. That distinction matters:
+        // it may legitimately clear an attempt that the oracle would reject.
+        provenance: "harness",
+        grounded: exitCode !== undefined,
+        timedOut: false,
+      }
+      verifications.push(record)
+      attempts = attributeVerdict(attempts, record, exitCode === 0)
+      // "Verified" here means *somebody looked at this state*, not "somebody
+      // confirmed it is good". Whether the state is any good is the attempt
+      // verdict's job, recorded above.
+      //
+      // Advancing only on a pass, or only on the oracle, left unverifiedDelta
+      // permanently true after any red result, so a policy that checks before
+      // its next edit could never reach its next edit.
+      verifiedCheckpointRef.value = currentCheckpoint
+    }
+
+    if (action !== "ACT" && action !== "STOP") {
+      recentActions.push({
+        action,
+        timestamp: Date.now(),
+        outcome: exitCode === 0 ? "success" : exitCode === undefined ? "success" : "failure",
+        cost: cost.tokens,
+        latencyMs,
       })
     }
 
-    recentActions.push({
-      action,
-      timestamp: Date.now(),
-      outcome: action === "TEST" || action === "VERIFY" ? (exitCode === 0 ? "success" : "failure") : "success",
-      cost: action === "ACT" ? (task.mutations.find((m) => m.id === mutationsApplied.at(-1))?.costTokens ?? cost.tokens) : cost.tokens,
-      latencyMs,
-      progressDelta: 0,
-    })
-
-    steps.push({ step, action, detail, costTokens: cost.tokens, latencyMs, exitCode })
+    steps.push({ step, action, detail, costTokens: cost.tokens, latencyMs, exitCode, channel })
 
     emit("tool_result", {
       callID: `${episodeId}-${step}`,
       tool: toolNameFor(action),
       title: detail,
-      // The harness executed this step, so it reports the operation outright
-      // rather than leaving ingest to infer it from a tool name.
       args: { cognitiveAction: action },
+      grounding: "harness",
+      provenance: "harness",
+      exitCode,
       output: detail,
       outputTruncated: false,
       latencyMs,
       errored: exitCode !== undefined && exitCode !== 0,
     })
-    if (action === "ACT" || action === "REASON_DEEP" || action === "REASON_FAST") {
-      emit("llm_call", {
-        agent: policyId,
-        model: { providerID: "bench", modelID: action === "ACT" ? "frontier" : "small" },
-      })
+    if (action === "ACT") {
+      emit("llm_call", { agent: policyId, model: { providerID: "bench", modelID: "frontier" } })
     }
 
-    // Success is judged by the oracle, never by the policy believing it is done.
     if (mutated && firstCorrectStep === null && env.verify().exitCode === 0) {
       firstCorrectStep = step
     }
 
     if (action === "STOP") break
     if (noProgress) break
-    if (action === "ACT" && remaining.length === 0) {
-      // No further edits are available. Give the policy one verification step
-      // before the episode is closed out, so it is never penalised for having
-      // no way to learn the outcome.
-      if (verification.tests !== "passed") {
-        continue
-      }
-      break
-    }
+    if (totalCostTokens > task.budget.maxTokens) break
   }
 
-  // Every policy is scored by the same final oracle check, so a policy cannot
-  // win by never verifying.
+  // Every policy is graded by the same complete oracle, so none can win by
+  // never verifying.
   const finalResult = env.verify()
   const success = finalResult.exitCode === 0
-  if (success && firstCorrectStep === null) {
-    firstCorrectStep = steps.length
-  }
 
-  // A rollback must not erase a rejection. The bench resets state constantly
-  // because every edit is judged alone, so this is the case that matters.
+  // A defect escaped exactly when the policy's own evidence said passing and
+  // the complete oracle disagreed. The policy stopped on a claim it had not
+  // actually established.
+  const escapedDefect = !success && believedPassing && believedOnCheapEvidence
+
+  if (success && firstCorrectStep === null) firstCorrectStep = steps.length
+
   for (const a of attempts) {
     if (a.resultingCheckpoint !== currentCheckpoint && a.verdict !== "pending") {
       a.reverted = true
@@ -387,15 +365,25 @@ export function runEpisode(options: RunOptions): BenchEpisode {
   emit("episode_close", { reason: "idle" })
   env.cleanup()
 
+  const utility =
+    (success ? task.costModel.success : 0) -
+    totalCostTokens -
+    (escapedDefect ? task.costModel.defectEscape : 0) -
+    steps.length * task.costModel.step
+
   return {
     taskId: task.id,
+    family: task.family,
     policy: policyId,
     success,
     steps,
     frontierCalls,
     testRuns,
+    verifyRuns,
+    escapedDefect,
     totalCostTokens,
     totalLatencyMs,
+    utility: Math.round(utility),
     mutationsApplied,
     stepsAfterFirstCorrect: firstCorrectStep === null ? steps.length : steps.length - firstCorrectStep,
   }
@@ -421,44 +409,52 @@ function toolNameFor(action: CognitiveActionKind): string {
 
 function buildState(input: {
   task: BenchTask
-  goal: string
   step: number
-  evidence: Evidence[]
-  uncertainties: Uncertainty[]
-  recentActions: ActionSummary[]
-  verification: VerificationStatus
-  remainingMutations: BenchMutation[]
+  evidence: unknown[]
+  recentActions: CognitiveStateLike["recentActions"]
+  verification: CognitiveStateLike["verification"]
   elapsedMs: number
+  constraints?: Constraint[]
   verifiedCheckpoint: string
   currentCheckpoint: string
   attempts: Attempt[]
-}): CognitiveState {
+}): CognitiveStateLike {
   return {
-    goal: input.goal,
+    goal: input.task.description,
     progress: input.verification.tests === "passed" ? 0.9 : 0.2,
     currentTask: `working on ${input.task.name}`,
-    evidence: input.evidence,
-    uncertainties: input.uncertainties,
-    constraints: [],
+    evidence: input.evidence as CognitiveState["evidence"],
+    // Recomputed from the live verification status rather than accumulated, so
+    // a stale uncertainty cannot outlive the evidence that produced it.
+    uncertainties: input.verification.tests === "passed"
+      ? []
+      : [
+          {
+            id: "u-unverified",
+            description:
+              input.verification.tests === "failed"
+                ? "checks are failing"
+                : "changes not yet verified",
+            severity: input.verification.tests === "failed" ? 0.9 : 0.7,
+            relatedActions: ["ACT", "READ", "TEST", "VERIFY"],
+          },
+        ],
+    constraints: input.task.constraints ?? [],
     recentActions: input.recentActions,
     verification: input.verification,
-    resources: {
-      contextTokens: input.evidence.reduce((sum, e) => sum + e.content.length / 4, 0),
-      remainingBudget: input.task.budget.maxTokens,
-      elapsedMs: input.elapsedMs,
-    },
-    authority: { canWrite: true, canDelete: false, canAskHuman: false },
-    // M4: the epistemology, available to the policy alongside the chronology.
     verifiedCheckpoint: input.verifiedCheckpoint,
     currentCheckpoint: input.currentCheckpoint,
     pendingAttempts: input.attempts.filter((a) => a.verdict === "pending"),
     falsifiedAttempts: input.attempts.filter((a) => a.verdict === "falsified"),
+    resources: {
+      contextTokens: 0,
+      remainingBudget: input.task.budget.maxTokens,
+      elapsedMs: input.elapsedMs,
+    },
+    authority: { canWrite: true, canDelete: false, canAskHuman: false },
     metadata: {
       step: input.step,
-      mutationsLeft: input.remainingMutations.length,
-      // True when the world has moved and nobody has looked since. This is the
-      // question V0 could not ask, exposed without any policy being able to
-      // act on it yet.
+      mutationsLeft: 0,
       unverifiedDelta: input.verifiedCheckpoint !== input.currentCheckpoint,
     },
   }

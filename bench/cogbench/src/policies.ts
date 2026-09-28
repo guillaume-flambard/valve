@@ -1,24 +1,18 @@
 import { createValveV0 } from "@valve/runtime"
-import type { CognitiveActionKind, CognitiveState } from "@valve/schema"
-import { CANDIDATES } from "./runner.js"
-import type { BenchTask, PolicyId, Policy, PolicyContext } from "./runner.js"
+import { CANDIDATES } from "./candidates.js"
+import type { BenchTask, Policy, PolicyContext } from "./runner.js"
+import type { PolicyId } from "./types.js"
 
 /**
- * VALVE-V0 as a bench policy.
+ * The policies CogBench compares.
  *
- * Uses the same `decideSync` path the shadow observer uses, so the bench
- * measures the policy that is actually observing you right now. It is
- * heuristics only: no network, no teacher model. What the bench measures is
- * therefore the V0 heuristic set, not a trained controller, and the number
- * should be read as a floor rather than as VALVE's ceiling.
- *
- * The guard below is not a thumb on the scale. VALVE sees candidate operations
- * and their costs; it does not know which are still executable. Proposing an
- * edit when no edit is left is proposing a dead action, and the bench caught
- * the raw policy spinning on that dead branch until it hit the step limit. The
- * guard maps a dead proposal onto a live one, which is a property of the
- * harness, not a claim about the policy.
+ * M5 added two channels, so "always verify" is no longer a single idea. A
+ * cheap partial test and a complete oracle are different actions with different
+ * prices, and the interesting question is not how often to check but which
+ * channel to check on. These baselines bracket that.
  */
+
+/** VALVE-V0, unchanged. M5 changed the benchmark, not the policy. */
 export const valveV0Policy: Policy = (state, _task, ctx) => {
   const valve = createValveV0()
   const decision = valve.decideSync({
@@ -26,78 +20,162 @@ export const valveV0Policy: Policy = (state, _task, ctx) => {
     candidates: CANDIDATES,
     utilityProfile: "coding-correctness",
   })
-
-  // Already verified: nothing further can improve on a passing oracle.
-  if (state.verification.tests === "passed") return "STOP"
-
-  if (decision.action === "ACT" && ctx.remainingMutations.length === 0) {
-    // Dead branch: no edit is left to make. Verify the final state once so the
-    // outcome is known, then stop. Mapping this straight onto TEST instead
-    // produced an endless loop of re-running a test that had just failed,
-    // because "tests are failing" is itself what proposes the dead edit.
-    const last = state.recentActions.at(-1)?.action
-    return last === "TEST" || last === "VERIFY" ? "STOP" : "TEST"
+  // The heuristic layer is untouched. Two guards are added, and both ask
+  // questions M4 made answerable: has the oracle already passed, and has the
+  // world moved since anyone last looked?
+  //
+  // The first guard is not optional. Without it a task that still has edits
+  // available re-runs an already-green oracle until it hits the step limit,
+  // because nothing in the heuristics distinguishes "the oracle passed" from
+  // "I have not checked yet".
+  if (ctx.lastVerifyExit === 0) return "STOP"
+  if (ctx.remainingMutations.length === 0) {
+    // Nothing left to try. A red oracle is a dead end, and re-running it is
+    // how a policy burns its step budget learning nothing.
+    if (ctx.lastVerifyExit === 1) return "STOP"
+    return state.metadata?.["unverifiedDelta"] ? "VERIFY" : "STOP"
   }
-
   return decision.action
 }
 
 /**
- * Baseline A: the behaviour shadow data actually shows most often. Edit until
- * the edits run out, then verify once at the end.
- *
- * This is the honest control. It is not a strawman: it is what an agent does
- * when it treats reasoning as the default and verification as a formality.
+ * The M3 control: edit until the edits run out, then stop. Kept so the ADR 0001
+ * result stays reproducible, and because in a world with an expensive oracle it
+ * is a genuinely tempting strategy.
  */
-export const naiveEditFirstPolicy: Policy = (state, _task, ctx) => {
+export const naiveEditFirstPolicy: Policy = (_state, _task, ctx) => {
   if (ctx.remainingMutations.length > 0) return "ACT"
-  // Every edit is spent. Verify once and finish.
-  //
-  // It does not react to a failing oracle, which is exactly the behaviour
-  // being measured. An earlier version returned TEST while the tests were red,
-  // which sent it into an unbounded loop re-running a test it had just seen
-  // fail. That is not a more interesting baseline, it is a broken one: it
-  // ends the episode with no information the runner did not already have.
-  void state
   return "STOP"
 }
 
 /**
- * Baseline B: maximal verification. Tests after every single step.
- *
- * Included because it is the reflexive response to "should we verify more?".
- * It should be safe and it should be expensive, and the bench exists to put a
- * number on both halves of that sentence rather than asserting them.
+ * Constant cheap checking. The reflexive answer to "should we verify more?".
+ * Safe when the local test is trustworthy, and quietly unsafe on family D,
+ * where it passes on a wrong fix.
  */
 export const testAlwaysPolicy: Policy = (state, _task, ctx) => {
-  // A passing oracle is terminal. Without this the policy kept editing after
-  // it had already succeeded and destroyed its own fix, which made it look
-  // worse than doing nothing.
-  if (state.verification.tests === "passed") return "STOP"
-  if (ctx.remainingMutations.length === 0) return "STOP"
-  // Verify, then immediately make progress, so the episode can still finish.
-  return state.recentActions.at(-1)?.action === "TEST" ? "ACT" : "TEST"
+  if (ctx.lastVerifyExit === 0) return "STOP"
+  // Trusts the cheap channel: a green local test ends the episode. This is the
+  // reflex the misleading-signal family exists to punish, and it is the reason
+  // that family has any discriminative power at all. A version that kept
+  // editing after a green local test would simply exhaust the edit list and
+  // never ship a defect, which would make the family measure nothing.
+  if (ctx.lastTestExit === 0) return "STOP"
+  if (ctx.remainingMutations.length === 0) {
+    // The cheap channel said passing, so it stops. On the misleading-signal
+    // family that is precisely how a defect escapes. A red oracle with no
+    // edits left is a dead branch, not a reason to re-run it.
+    if (state.verification.tests === "passed") return "STOP"
+    return ctx.lastVerifyExit === 1 ? "STOP" : "VERIFY"
+  }
+  if (state.metadata?.["unverifiedDelta"]) return "TEST"
+  if (ctx.step === 1) return "READ"
+  return "ACT"
 }
 
 /**
- * Baseline C: never verify. A frontier model that simply keeps editing.
- *
- * This is the condition VALVE's StopHead and Value-of-Information head exist
- * to detect, and it is the only baseline that can be expected to fail.
+ * Constant complete checking. The safety reference: it cannot ship a defect,
+ * because the oracle is the thing it runs.
  */
+export const verifyAlwaysPolicy: Policy = (state, _task, ctx) => {
+  if (ctx.lastVerifyExit === 0) return "STOP"
+  if (ctx.remainingMutations.length === 0) {
+    // Nothing left to try. A red oracle is a dead end, and re-running it is
+    // how a policy burns its step budget learning nothing.
+    if (ctx.lastVerifyExit === 1) return "STOP"
+    return state.metadata?.["unverifiedDelta"] ? "VERIFY" : "STOP"
+  }
+  // Ask the question directly instead of inferring it from the last action.
+  // An edit that has not been checked is checked before the next edit is made,
+  // which is what stops a run of edits from landing on whichever was last.
+  if (state.metadata?.["unverifiedDelta"]) return "VERIFY"
+  if (ctx.step === 1) return "READ"
+  return "ACT"
+}
+
+/** Never checks anything. Solves by ordering luck alone. */
 export const actAlwaysPolicy: Policy = (_state, _task, ctx) =>
   ctx.remainingMutations.length > 0 ? "ACT" : "STOP"
+
+/**
+ * Never edits. The floor: it must lose every task that needs a change, and it
+ * is the only policy that should be allowed to win on family A, where doing
+ * nothing is the correct move.
+ */
+export const stopImmediatelyPolicy: Policy = () => "STOP"
 
 export const POLICIES: Record<PolicyId, Policy> = {
   "valve-v0": valveV0Policy,
   "naive-edit-first": naiveEditFirstPolicy,
   "test-always": testAlwaysPolicy,
+  "verify-always": verifyAlwaysPolicy,
   "act-always": actAlwaysPolicy,
+  "stop-immediately": stopImmediatelyPolicy,
 }
 
+/**
+ * Order matters for reading the table: the safety references first, then the
+ * cheap strategies, then the scheduler being evaluated.
+ */
 export const POLICY_ORDER: PolicyId[] = [
-  "naive-edit-first",
-  "valve-v0",
+  "verify-always",
   "test-always",
+  "valve-v0",
+  "naive-edit-first",
   "act-always",
+  "stop-immediately",
 ]
+
+export interface EpisodeLike {
+  taskId: string
+  policy: string
+  success: boolean
+  utility: number
+  totalCostTokens: number
+  escapedDefect: boolean
+}
+
+/**
+ * Cost and safety of a policy across a set of tasks.
+ *
+ * `totalUtility` is deliberately absent. Success is priced per task, from 6,000
+ * on a routine fix to 70,000 where an escaped defect is catastrophic, so
+ * summing utility across tasks adds numbers that are not on the same scale and
+ * produces a ranking that means nothing. Utility is only comparable within a
+ * single task, and `utilityWins` below is the aggregate that respects that.
+ */
+export function summarise(episodes: EpisodeLike[]) {
+  const solved = episodes.filter((e) => e.success).length
+  return {
+    tasks: episodes.length,
+    solved,
+    successRate: episodes.length === 0 ? 0 : solved / episodes.length,
+    escapedDefects: episodes.filter((e) => e.escapedDefect).length,
+    totalCostTokens: episodes.reduce((a, e) => a + e.totalCostTokens, 0),
+  }
+}
+
+/**
+ * How many tasks each policy has the highest utility on.
+ *
+ * This is the only cross-task comparison the cost model supports, because each
+ * task carries its own prices. A policy that wins here has found the cheapest
+ * safe strategy *for that task's* trade-off, which is the property of interest.
+ */
+export function utilityWins(episodes: EpisodeLike[]): Record<string, number> {
+  const byTask = new Map<string, EpisodeLike[]>()
+  for (const e of episodes) {
+    const list = byTask.get(e.taskId)
+    if (list) list.push(e)
+    else byTask.set(e.taskId, [e])
+  }
+  const wins: Record<string, number> = {}
+  for (const [, rows] of byTask) {
+    let best: EpisodeLike | undefined
+    for (const row of rows) if (!best || row.utility > best.utility) best = row
+    if (best) wins[best.policy] = (wins[best.policy] ?? 0) + 1
+  }
+  return wins
+}
+
+export type { BenchTask }
