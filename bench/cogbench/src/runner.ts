@@ -24,6 +24,22 @@ export interface ObservedSink {
   write(record: Record<string, unknown>): void
 }
 
+/**
+ * Cross-episode resource, shared by every task in a benchmark run.
+ *
+ * It exists for one question that a per-episode policy cannot answer: not
+ * "does this task deserve the oracle" but "with three oracle calls for eight
+ * tasks, where should they be spent". A budget object that is per-episode would
+ * silently reduce that back to the easy question.
+ */
+export interface OracleBudget {
+  total: number
+  used: number
+  /** Spend is refused once exhausted; the caller must fall back. */
+  available(): boolean
+  spend(): boolean
+}
+
 export interface PolicyContext {
   remainingMutations: BenchMutation[]
   readFiles: Set<string>
@@ -33,6 +49,15 @@ export interface PolicyContext {
   lastTestExit?: number
   /** Exit code of the most recent VERIFY, if any. */
   lastVerifyExit?: number
+  /**
+   * Attempts tried and judged, oldest first. Present so a policy can ask what
+   * has already been falsified rather than inferring it from a step count.
+   */
+  attempts?: Attempt[]
+  /** Shared across the run, when the caller supplied one. */
+  oracleBudget?: OracleBudget
+  /** Total oracle calls made in this episode. */
+  oracleCalls: number
 }
 
 export type Policy = (
@@ -59,6 +84,8 @@ export interface RunOptions {
   spool?: ObservedSink
   maxSteps?: number
   onAttempts?: (attempts: Attempt[], verifications: Verification[]) => void
+  /** Shared across tasks, for policies that allocate a verification budget. */
+  oracleBudget?: OracleBudget
 }
 
 function costFor(task: BenchTask, action: CognitiveActionKind): ActionCost {
@@ -143,6 +170,9 @@ export function runEpisode(options: RunOptions): BenchEpisode {
       step,
       lastTestExit,
       lastVerifyExit,
+      attempts,
+      oracleBudget: options.oracleBudget,
+      oracleCalls: verifyRuns,
     }
     const action = policy(state, task, ctx)
 
@@ -212,9 +242,16 @@ export function runEpisode(options: RunOptions): BenchEpisode {
           latencyMs: cost.latencyMs,
           attemptId: attempt.id,
         })
-        // Any edit invalidates the earlier green evidence it was based on.
+        // Any edit invalidates the earlier evidence, both green and red.
+        //
+        // Clearing the red case matters as much as the green one: a refutation
+        // describes the state it was observed on, and after an edit that state
+        // no longer exists. Keeping it let a policy carry "already refuted"
+        // across an edit and overwrite its own best attempt with the next one.
         believedPassing = false
         believedOnCheapEvidence = false
+        lastTestExit = undefined
+        lastVerifyExit = undefined
         break
       }
       case "TEST": {
@@ -230,6 +267,14 @@ export function runEpisode(options: RunOptions): BenchEpisode {
         break
       }
       case "VERIFY": {
+        // A budget is a hard constraint, not a preference. Spending past it is
+        // refused so the policy must fall back to cheaper evidence, which is
+        // the behaviour the budgeted policy is being measured on.
+        if (options.oracleBudget && !options.oracleBudget.spend()) {
+          detail = "oracle budget exhausted"
+          noProgress = true
+          break
+        }
         const result = env.verify()
         verifyRuns++
         exitCode = result.exitCode
@@ -380,6 +425,7 @@ export function runEpisode(options: RunOptions): BenchEpisode {
     frontierCalls,
     testRuns,
     verifyRuns,
+    stepCount: steps.length,
     escapedDefect,
     totalCostTokens,
     totalLatencyMs,

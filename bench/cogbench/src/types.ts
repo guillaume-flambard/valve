@@ -132,12 +132,18 @@ export interface BenchTask {
 }
 
 export type PolicyId =
+  // Bounds and history
+  | "verify-always"
+  | "test-always"
   | "valve-v0"
   | "naive-edit-first"
-  | "test-always"
-  | "verify-always"
   | "act-always"
   | "stop-immediately"
+  // M6: evidence-acquisition policies
+  | "confidence-threshold"
+  | "evidence-gated"
+  | "risk-adjusted"
+  | "oracle-budgeted"
 
 export interface StepRecord {
   step: number
@@ -166,6 +172,7 @@ export interface BenchEpisode {
   frontierCalls: number
   testRuns: number
   verifyRuns: number
+  stepCount: number
 
   /**
    * The policy's own evidence said passing, and the full oracle disagreed.

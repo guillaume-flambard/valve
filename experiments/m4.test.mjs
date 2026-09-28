@@ -473,11 +473,23 @@ test("the contrast the milestone exists to expose is real", () => {
  * What this test protects is the thing M5 promised: no policy moved. If any of
  * these numbers drift, a policy changed, and the milestone boundary was
  * crossed silently.
+ *
+ * DEVIATION, recorded rather than hidden. M6 immediately surfaced a runner bug:
+ * a refutation was carried across an edit, so a policy could treat an already
+ * refuted state as still refuted and overwrite its own best attempt. The fix
+ * clears evidence when the world moves, which is correct, and it moved the
+ * baselines: verify-always went from 25,100 to 27,500 and valve-v0 from 27,920
+ * to 35,740. The tasks and the cost model were NOT touched.
+ *
+ * The freeze exists to stop a policy being fitted to the benchmark. A state
+ * tracking bug in the harness is not that, and leaving a known-wrong
+ * measurement in place to protect a nicer number would defeat the purpose of
+ * the whole project. The cost of the freeze is being paid here, visibly.
  */
 const FROZEN_FAMILY_BENCH = {
-  "verify-always": { solved: 7, cost: 25100, escaped: 0 },
+  "verify-always": { solved: 7, cost: 27500, escaped: 0 },
   "test-always": { solved: 4, cost: 10180, escaped: 3 },
-  "valve-v0": { solved: 3, cost: 27920, escaped: 0 },
+  "valve-v0": { solved: 3, cost: 35740, escaped: 0 },
   "naive-edit-first": { solved: 2, cost: 15900, escaped: 0 },
   "act-always": { solved: 2, cost: 15900, escaped: 0 },
   "stop-immediately": { solved: 1, cost: 0, escaped: 0 },

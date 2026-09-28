@@ -104,13 +104,33 @@ export const actAlwaysPolicy: Policy = (_state, _task, ctx) =>
  */
 export const stopImmediatelyPolicy: Policy = () => "STOP"
 
+export {
+  confidenceThresholdPolicy,
+  evidenceGatedPolicy,
+  riskAdjustedPolicy,
+  oracleBudgetedPolicy,
+} from "./policies-m6.js"
+
+import {
+  confidenceThresholdPolicy,
+  evidenceGatedPolicy,
+  oracleBudgetedPolicy,
+  riskAdjustedPolicy,
+} from "./policies-m6.js"
+
 export const POLICIES: Record<PolicyId, Policy> = {
+  // Bounds and history
+  "verify-always": verifyAlwaysPolicy,
+  "test-always": testAlwaysPolicy,
   "valve-v0": valveV0Policy,
   "naive-edit-first": naiveEditFirstPolicy,
-  "test-always": testAlwaysPolicy,
-  "verify-always": verifyAlwaysPolicy,
   "act-always": actAlwaysPolicy,
   "stop-immediately": stopImmediatelyPolicy,
+  // M6: evidence acquisition
+  "confidence-threshold": confidenceThresholdPolicy(),
+  "evidence-gated": evidenceGatedPolicy,
+  "risk-adjusted": riskAdjustedPolicy,
+  "oracle-budgeted": oracleBudgetedPolicy,
 }
 
 /**
@@ -121,10 +141,22 @@ export const POLICY_ORDER: PolicyId[] = [
   "verify-always",
   "test-always",
   "valve-v0",
+  "risk-adjusted",
+  "evidence-gated",
+  "confidence-threshold",
+  "oracle-budgeted",
   "naive-edit-first",
   "act-always",
   "stop-immediately",
 ]
+
+/**
+ * How many oracle calls the budgeted policy is given, as a fraction of the
+ * number of tasks. One per task is the unconstrained case, which must
+ * reproduce roughly the safety bound; a smaller share is the regime where
+ * allocation actually matters.
+ */
+export const ORACLE_BUDGET_RATIO = 0.5
 
 export interface EpisodeLike {
   taskId: string

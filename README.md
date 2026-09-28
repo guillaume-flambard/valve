@@ -19,8 +19,9 @@ What exists:
 | M2 OpenCode shadow observer, spool, ingest, disagreement queries | done |
 | M3 CogBench: real exit codes as the only success signal | done, **negative result** |
 | M4 Outcome-aware state: attempts, checkpoints, verdicts, grounded labels | done |
-| M5 CogBench families A–H, per-task verification cost, **frozen** | done |
-| M6 Rejection- and value-aware policy | **next, unblocked** |
+| M5 CogBench families A–H, per-task verification cost | frozen |
+| M6 Evidence-acquisition policies | done, **close but not sufficient** |
+| M7 Replication corpus: 8 development tasks to 24 unseen | **next** |
 
 The two results worth reading before anything else:
 
@@ -30,9 +31,13 @@ The two results worth reading before anything else:
 - **[ADR 0002](docs/decisions/0002-outcome-aware-trajectory-state.md)** — the
   representation, not the policy, was the blocker, and the dataset can now say
   *why* a run went wrong.
-- **[ADR 0003](docs/decisions/0003-cogbench-frozen.md)** — the benchmark now
-  varies the price of verification, includes tasks where *not* verifying is
-  correct, and finds V0 dominated on **both** axes.
+- **[ADR 0003](docs/decisions/0003-cogbench-frozen.md)** — the benchmark varies
+  the price of verification, includes tasks where *not* verifying is correct,
+  and finds V0 dominated on **both** axes.
+- **[ADR 0004](docs/decisions/0004-evidence-acquisition-policies.md)** — a
+  gating policy beats V0 on both axes (6/8 against 3/8, cheaper) but still
+  trails the safety bound. The policy the thesis predicts is the *worst* of them,
+  which is reported as a negative result rather than tuned away.
 
 ## Overview
 
@@ -278,10 +283,12 @@ a task, because each task prices success differently.
   weight. **Frozen** — see ADR 0003. Two fixtures can falsify a policy but cannot
   establish one, and a benchmark where verifying is almost always right rewards
   any policy that simply verifies more.
-- **M6** Rejection- and value-aware policy. Reads `falsifiedAttempts` and
-  `unverifiedDelta` for the first time. **The benchmark is frozen: no task or
-  cost change while this is written.** Whether it wins or loses, ADR 0004 is
-  published.
+- **M6** ✓ Evidence-acquisition policies: confidence-threshold, evidence-gated,
+  risk-adjusted, oracle-budgeted. The question is how much evidence is enough to
+  avoid buying the full oracle. **The policy set is now frozen too.**
+- **M7** Replication corpus: 8 development tasks to 24 unseen ones, evaluated
+  without touching the policies. On 8 tasks with one instance per family, the
+  M6 result is a hypothesis, not a finding.
 - **M7** Counterfactual replay from checkpoints
 - **M8** Dataset v1 (100k+ decision points)
 - **M9** VALVE-1: small supervised model, then calibration (ECE, Brier)
