@@ -8,11 +8,14 @@
     "trainer/*"
   ],
   "scripts": {
-    "build": "tsc -b packages/schema packages/runtime packages/telemetry packages/opencode-adapter packages/jev-adapter",
-    "clean:ts": "tsc -b --clean packages/schema packages/runtime packages/telemetry packages/opencode-adapter packages/jev-adapter",
-    "dev": "tsc -b -w packages/schema packages/runtime packages/telemetry packages/opencode-adapter packages/jev-adapter",
+    "build": "tsc -b packages/schema packages/runtime packages/telemetry packages/opencode-adapter packages/jev-adapter bench/cogbench",
+    "clean:ts": "tsc -b --clean packages/schema packages/runtime packages/telemetry packages/opencode-adapter packages/jev-adapter bench/cogbench",
+    "dev": "tsc -b -w packages/schema packages/runtime packages/telemetry packages/opencode-adapter packages/jev-adapter bench/cogbench",
     "ingest": "node scripts/ingest.mjs",
     "smoke": "node experiments/smoke-v0.mjs",
+    "fixtures": "node experiments/verify-fixtures.mjs && node experiments/verify-m7-fixtures.mjs",
+    "m7": "node experiments/m7-replication.mjs",
+    "probe": "node experiments/probe-stale-evidence.mjs",
     "test": "node --test experiments/*.test.mjs"
   },
   "devDependencies": {

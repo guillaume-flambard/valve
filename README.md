@@ -21,7 +21,7 @@ What exists:
 | M4 Outcome-aware state: attempts, checkpoints, verdicts, grounded labels | done |
 | M5 CogBench families A–H, per-task verification cost | frozen |
 | M6 Evidence-acquisition policies | done, **close but not sufficient** |
-| M7 Replication corpus: 8 development tasks to 24 unseen | **next** |
+| M7 Replication corpus: 8 development tasks to 24 unseen | done, **and it found a harness defect** |
 
 The two results worth reading before anything else:
 
@@ -38,6 +38,26 @@ The two results worth reading before anything else:
   gating policy beats V0 on both axes (6/8 against 3/8, cheaper) but still
   trails the safety bound. The policy the thesis predicts is the *worst* of them,
   which is reported as a negative result rather than tuned away.
+- **[ADR 0005](docs/decisions/0005-m7-replication.md)** — 24 unseen tasks
+  reproduce the M6 shape (18/24 against 20/24, nothing escaped, half the cost) and
+  then find that the runner keeps a **stale refutation** alive across an edit,
+  through a second copy of the same fact that ADR 0004's fix did not clear. The
+  measured size of the contamination is one line, and it is large enough to
+  reverse both the M7 verdict and ADR 0004's most interesting negative result. One
+  decision is left open, and it is about recorded numbers, so it is not taken there.
+
+## M7 in one paragraph
+
+The replication is the first thing in this repository measured by somebody who had
+read the policies, which the protocol states as its largest weakness. It reproduced
+the M6 shape, and its per-task divergence records reduced every difference to one
+decision: after the first edit, `verify-always` buys the oracle and `evidence-gated`
+runs the cheap test. Then the traces showed a policy ending an episode on a state it
+had never examined, and the reason is that `state.verification.tests` survives an
+edit that clears the two exit codes beside it. `evidence-gated` applies the correct
+fix and overwrites it, three times out of 24, and `valve-v0` was hiding three
+escaped defects on the development corpus. ADR 0005 carries the measurement and the
+three options.
 
 ## Overview
 
@@ -286,11 +306,12 @@ a task, because each task prices success differently.
 - **M6** ✓ Evidence-acquisition policies: confidence-threshold, evidence-gated,
   risk-adjusted, oracle-budgeted. The question is how much evidence is enough to
   avoid buying the full oracle. **The policy set is now frozen too.**
-- **M7** Replication corpus: 8 development tasks to 24 unseen ones, evaluated
-  without touching the policies. On 8 tasks with one instance per family, the
-  M6 result is a hypothesis, not a finding.
+- **M7** ✓ Replication corpus: 24 unseen tasks, three per family, pre-registered,
+  policies and harness frozen by hash. Reproduces the M6 shape, and finds the stale
+  evidence defect (ADR 0005). One decision about recorded numbers is open.
 - **M7** Counterfactual replay from checkpoints
 - **M8** Dataset v1 (100k+ decision points)
+
 - **M9** VALVE-1: small supervised model, then calibration (ECE, Brier)
 - **M10** Low-risk live control
 
