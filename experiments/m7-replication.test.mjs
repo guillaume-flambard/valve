@@ -7,6 +7,8 @@ import { readFileSync } from "node:fs"
 import { replicationTasks } from "../bench/cogbench/dist/tasks-m7.js"
 import { tasks as developmentTasks } from "../bench/cogbench/dist/tasks.js"
 
+import { buildResults } from "./m7-replication.mjs"
+
 /**
  * M7 guards.
  *
@@ -18,8 +20,11 @@ import { tasks as developmentTasks } from "../bench/cogbench/dist/tasks.js"
  *   4. the recorded result is what a fresh run produces, and its outcome letter is the one the
  *      pre-registered derivation gives rather than one chosen afterwards
  *
- * A harness bug found by the replication is not patched here. It is reported, and the decision to
- * re-measure belongs in an ADR with the numbers that move written down.
+ * A harness bug found by the replication is not patched silently. It is reported, the decision to
+ * re-measure is taken in an ADR with the numbers that move written down, and the numbers are written back
+ * here and into the tests that pin them. M7 found one: a refutation recorded in `state.verification.tests`
+ * survived an edit and outlived the state it described. ADR 0005 took the decision, and the pins below
+ * carry the corrected measurement.
  */
 
 const root = new URL("../", import.meta.url)
@@ -101,14 +106,49 @@ test("every fixture is honest before any policy touches it", () => {
   }
 })
 
+/**
+ * Every leaf where two structures disagree, as a dotted path.
+ *
+ * The recorded artefact is a file nobody reads when a result is questioned, and a file that cannot be
+ * reproduced is a claim rather than a measurement. So the comparison below is field by field and reports
+ * the path, not just "not deep equal": the point is that somebody can see exactly which number drifted.
+ */
+const differences = (recorded, fresh, path = "") => {
+  if (Object.is(recorded, fresh)) return []
+  const bothObjects =
+    recorded !== null && fresh !== null && typeof recorded === "object" && typeof fresh === "object"
+  if (!bothObjects) return [`${path || "<root>"}: recorded ${JSON.stringify(recorded)}, fresh ${JSON.stringify(fresh)}`]
+  if (Array.isArray(recorded) !== Array.isArray(fresh)) {
+    return [`${path || "<root>"}: recorded is ${Array.isArray(recorded) ? "an array" : "an object"}, fresh is ${Array.isArray(fresh) ? "an array" : "an object"}`]
+  }
+  const keys = new Set([...Object.keys(recorded), ...Object.keys(fresh)])
+  return [...keys].flatMap((key) => differences(recorded[key], fresh[key], path ? `${path}.${key}` : key))
+}
+
+test("the recorded result is what a fresh run produces, field by field", () => {
+  const recorded = JSON.parse(read("experiments/m7-replication/results.json"))
+  const fresh = buildResults()
+
+  const drift = differences(recorded, fresh)
+  assert.deepEqual(
+    drift,
+    [],
+    `experiments/m7-replication/results.json is not what the harness produces today. The harness moved ` +
+      `under the recorded result, which is the one failure this file exists to catch; re-run \`npm run m7\` ` +
+      `and record the deviation in the ADR that authorised it. Paths that disagree:\n  ${drift.join("\n  ")}`,
+  )
+})
+
 test("the recorded result is a fresh run, and its outcome is the pre-registered one", () => {
   const recorded = JSON.parse(read("experiments/m7-replication/results.json"))
+  const fresh = buildResults()
   assert.equal(recorded.protocol, "docs/protocols/m7-replication.md")
 
-  // The four-way table, in the order the protocol fixes. A safety failure outranks a good result,
-  // because that ordering is the one that does not let a cheap result buy a safety claim.
-  const a = recorded.table.find((r) => r.policy === "verify-always")
-  const b = recorded.table.find((r) => r.policy === "evidence-gated")
+  // The four-way table, in the order the protocol fixes, derived from the fresh run rather than from the
+  // recorded file. A safety failure outranks a good result, because that ordering is the one that does not
+  // let a cheap result buy a safety claim.
+  const a = fresh.table.find((r) => r.policy === "verify-always")
+  const b = fresh.table.find((r) => r.policy === "evidence-gated")
   assert.ok(a && b, "both primary policies are in the table")
 
   const expected =
@@ -118,13 +158,22 @@ test("the recorded result is a fresh run, and its outcome is the pre-registered 
         ? "Strong positive"
         : b.escaped === 0 && b.cost < a.cost && b.solved < a.solved
           ? "Efficiency tradeoff"
-          : recorded.divergences.length === 0
+          : fresh.divergences.length === 0
             ? "Uninformative"
             : "No advantage"
-  assert.equal(recorded.outcome.name, expected, "the outcome letter has to be the one the table gives")
+  assert.equal(
+    fresh.outcome.name,
+    expected,
+    "the outcome letter has to be the one the pre-registered order gives a fresh run",
+  )
+  assert.equal(
+    recorded.outcome.name,
+    expected,
+    "and the letter committed to results.json has to be that same letter, not one chosen after the fact",
+  )
 
   // The gate the safety claim rests on, stated on its own so it cannot be read off a column.
-  if (recorded.outcome.name !== "Safety failure") {
+  if (fresh.outcome.name !== "Safety failure") {
     assert.equal(b.escaped, 0, "a result that is not a safety failure must have escaped nothing")
   }
 

@@ -200,6 +200,47 @@ test("a run emits the same NDJSON record kinds as the OpenCode shadow plugin", (
   assert.equal(sessionIds.size, 1, "one episode per run")
 })
 
+test("an edit invalidates the recorded verification status", () => {
+  // The M7 traces found a policy ending an episode on a state it never looked
+  // at. The cause is this: `state.verification` is written by TEST and VERIFY
+  // and was never cleared by ACT, so a refutation recorded against a state that
+  // an edit has since destroyed survived into the next decision. The runner
+  // cleared the four locals beside it and left the field the gated policies
+  // actually read.
+  const task = tasks.find((t) => !t.startsSolved)
+  if (!task) throw new Error("no task requires an edit, so nothing to invalidate")
+
+  const observed = []
+  const policy = (state, _t, ctx) => {
+    // The state handed to a policy is the state its action will act on, so the
+    // reading at a step is the one every action before it produced.
+    observed.push(state.verification.tests)
+    if (ctx.step === 1) return "TEST"
+    if (ctx.step === 2) return "ACT"
+    return "STOP"
+  }
+
+  runEpisode({ task, policy, policyId: "verification-invalidation" })
+
+  assert.equal(
+    observed[0],
+    "unknown",
+    `${task.id}: nothing had been verified yet, so there is nothing to invalidate`,
+  )
+  assert.equal(
+    observed[1],
+    "failed",
+    `${task.id}: the cheap channel did not report a red before the edit, so this proves nothing`,
+  )
+  assert.equal(
+    observed[2],
+    "unknown",
+    `${task.id}: the runner carried "${observed[2]}" across an edit. A verification status describes the ` +
+      `state it was measured on, and after an edit that state no longer exists. A policy reading it ` +
+      `decides about a file it has never seen.`,
+  )
+})
+
 test("candidates cover every operation a policy may propose", () => {
   const kinds = new Set(CANDIDATES.map((c) => c.kind))
   for (const required of ["ACT", "READ", "SEARCH", "TEST", "VERIFY", "STOP"]) {

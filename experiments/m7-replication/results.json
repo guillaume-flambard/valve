@@ -69,81 +69,81 @@
     {
       "policy": "valve-v0",
       "tasks": 24,
-      "solved": 14,
-      "escaped": 0,
-      "cheap": 24,
-      "oracle": 25,
-      "edits": 58,
-      "steps": 155,
-      "cost": 111540,
-      "wastedSteps": 59,
+      "solved": 19,
+      "escaped": 5,
+      "cheap": 129,
+      "oracle": 9,
+      "edits": 33,
+      "steps": 202,
+      "cost": 66330,
+      "wastedSteps": 120,
       "bestUtilityOn": 0,
       "actions": {
         "READ": 24,
-        "TEST": 24,
-        "VERIFY": 25,
-        "STOP": 24,
-        "ACT": 58
+        "TEST": 129,
+        "VERIFY": 9,
+        "STOP": 7,
+        "ACT": 33
       }
     },
     {
       "policy": "risk-adjusted",
       "tasks": 24,
-      "solved": 14,
+      "solved": 24,
       "escaped": 0,
-      "cheap": 1,
-      "oracle": 23,
-      "edits": 58,
-      "steps": 107,
-      "cost": 87810,
-      "wastedSteps": 38,
+      "cheap": 2,
+      "oracle": 62,
+      "edits": 41,
+      "steps": 130,
+      "cost": 134120,
+      "wastedSteps": 42,
       "bestUtilityOn": 0,
       "actions": {
-        "VERIFY": 23,
+        "VERIFY": 62,
         "STOP": 24,
-        "ACT": 58,
+        "ACT": 41,
         "READ": 1,
-        "TEST": 1
+        "TEST": 2
       }
     },
     {
       "policy": "evidence-gated",
       "tasks": 24,
-      "solved": 18,
+      "solved": 21,
       "escaped": 0,
-      "cheap": 24,
-      "oracle": 12,
-      "edits": 51,
-      "steps": 135,
-      "cost": 71260,
-      "wastedSteps": 56,
+      "cheap": 34,
+      "oracle": 31,
+      "edits": 47,
+      "steps": 159,
+      "cost": 125730,
+      "wastedSteps": 70,
       "bestUtilityOn": 0,
       "actions": {
         "READ": 24,
-        "ACT": 51,
-        "TEST": 24,
-        "STOP": 24,
-        "VERIFY": 12
+        "ACT": 47,
+        "TEST": 34,
+        "VERIFY": 31,
+        "STOP": 23
       }
     },
     {
       "policy": "confidence-threshold",
       "tasks": 24,
-      "solved": 11,
+      "solved": 14,
       "escaped": 0,
       "cheap": 32,
-      "oracle": 9,
-      "edits": 64,
-      "steps": 153,
-      "cost": 82550,
-      "wastedSteps": 75,
+      "oracle": 28,
+      "edits": 60,
+      "steps": 167,
+      "cost": 136410,
+      "wastedSteps": 85,
       "bestUtilityOn": 0,
       "actions": {
         "READ": 24,
-        "ACT": 64,
+        "ACT": 60,
         "TEST": 32,
-        "STOP": 24,
-        "VERIFY": 9
+        "VERIFY": 28,
+        "STOP": 23
       }
     },
     {
@@ -151,19 +151,19 @@
       "tasks": 24,
       "solved": 11,
       "escaped": 0,
-      "cheap": 32,
-      "oracle": 9,
+      "cheap": 40,
+      "oracle": 24,
       "edits": 64,
-      "steps": 153,
-      "cost": 82550,
-      "wastedSteps": 75,
+      "steps": 176,
+      "cost": 118280,
+      "wastedSteps": 94,
       "bestUtilityOn": 0,
       "actions": {
         "READ": 24,
         "ACT": 64,
-        "TEST": 32,
-        "STOP": 24,
-        "VERIFY": 9
+        "TEST": 40,
+        "VERIFY": 24,
+        "STOP": 24
       }
     },
     {
@@ -233,10 +233,10 @@
     "B-trivial": {
       "verify-always": 3,
       "test-always": 3,
-      "valve-v0": 1,
-      "risk-adjusted": 1,
-      "evidence-gated": 2,
-      "confidence-threshold": 1,
+      "valve-v0": 3,
+      "risk-adjusted": 3,
+      "evidence-gated": 3,
+      "confidence-threshold": 2,
       "oracle-budgeted": 1,
       "naive-edit-first": 1,
       "act-always": 1,
@@ -245,10 +245,10 @@
     "C-competing-hypotheses": {
       "verify-always": 3,
       "test-always": 3,
-      "valve-v0": 1,
-      "risk-adjusted": 1,
-      "evidence-gated": 2,
-      "confidence-threshold": 1,
+      "valve-v0": 3,
+      "risk-adjusted": 3,
+      "evidence-gated": 3,
+      "confidence-threshold": 2,
       "oracle-budgeted": 1,
       "naive-edit-first": 1,
       "act-always": 1,
@@ -257,8 +257,8 @@
     "D-misleading-local-signal": {
       "verify-always": 3,
       "test-always": 1,
-      "valve-v0": 2,
-      "risk-adjusted": 2,
+      "valve-v0": 1,
+      "risk-adjusted": 3,
       "evidence-gated": 3,
       "confidence-threshold": 2,
       "oracle-budgeted": 2,
@@ -269,8 +269,8 @@
     "E-expensive-verifier": {
       "verify-always": 3,
       "test-always": 3,
-      "valve-v0": 1,
-      "risk-adjusted": 1,
+      "valve-v0": 3,
+      "risk-adjusted": 3,
       "evidence-gated": 3,
       "confidence-threshold": 1,
       "oracle-budgeted": 1,
@@ -282,7 +282,7 @@
       "verify-always": 2,
       "test-always": 2,
       "valve-v0": 2,
-      "risk-adjusted": 2,
+      "risk-adjusted": 3,
       "evidence-gated": 3,
       "confidence-threshold": 2,
       "oracle-budgeted": 2,
@@ -293,8 +293,8 @@
     "G-information-before-action": {
       "verify-always": 3,
       "test-always": 3,
-      "valve-v0": 2,
-      "risk-adjusted": 2,
+      "valve-v0": 3,
+      "risk-adjusted": 3,
       "evidence-gated": 3,
       "confidence-threshold": 2,
       "oracle-budgeted": 2,
@@ -305,10 +305,10 @@
     "H-high-risk": {
       "verify-always": 3,
       "test-always": 1,
-      "valve-v0": 2,
-      "risk-adjusted": 2,
-      "evidence-gated": 2,
-      "confidence-threshold": 2,
+      "valve-v0": 1,
+      "risk-adjusted": 3,
+      "evidence-gated": 3,
+      "confidence-threshold": 3,
       "oracle-budgeted": 2,
       "naive-edit-first": 2,
       "act-always": 2,
@@ -320,8 +320,8 @@
     "m6Leader": "evidence-gated"
   },
   "outcome": {
-    "name": "Efficiency tradeoff",
-    "reason": "evidence-gated escaped nothing and cost 71260 against 140400, but solved 18 against 20."
+    "name": "Strong positive",
+    "reason": "evidence-gated escaped nothing, solved 21 against 20, and cost 125730 against 140400."
   },
   "divergences": [
     {
@@ -343,13 +343,14 @@
       },
       "evidence-gated": {
         "solved": false,
-        "cost": 2280,
+        "cost": 3180,
         "escaped": false,
         "actions": [
           "READ",
           "ACT",
           "TEST",
           "ACT",
+          "VERIFY",
           "STOP"
         ]
       },
@@ -364,7 +365,7 @@
       "actionEvidenceGated": "TEST",
       "outcomeDivergence": {
         "solvedBy": "neither",
-        "costGap": 1680
+        "costGap": 780
       },
       "firstUnrecoverableStep": {
         "verify-always": null,
@@ -390,13 +391,14 @@
       },
       "evidence-gated": {
         "solved": false,
-        "cost": 2380,
+        "cost": 2780,
         "escaped": false,
         "actions": [
           "READ",
           "ACT",
           "TEST",
           "ACT",
+          "VERIFY",
           "STOP"
         ]
       },
@@ -411,7 +413,7 @@
       "actionEvidenceGated": "TEST",
       "outcomeDivergence": {
         "solvedBy": "neither",
-        "costGap": 680
+        "costGap": 280
       },
       "firstUnrecoverableStep": {
         "verify-always": null,
@@ -437,13 +439,14 @@
       },
       "evidence-gated": {
         "solved": false,
-        "cost": 2080,
+        "cost": 4680,
         "escaped": false,
         "actions": [
           "READ",
           "ACT",
           "TEST",
           "ACT",
+          "VERIFY",
           "STOP"
         ]
       },
@@ -458,7 +461,7 @@
       "actionEvidenceGated": "TEST",
       "outcomeDivergence": {
         "solvedBy": "neither",
-        "costGap": 5080
+        "costGap": 2480
       },
       "firstUnrecoverableStep": {
         "verify-always": null,
@@ -468,7 +471,7 @@
     {
       "task": "B-m7-2-loop-bound",
       "family": "B-trivial",
-      "reason": "different success",
+      "reason": "cost gap of at least 10%",
       "verify-always": {
         "solved": true,
         "cost": 5560,
@@ -483,15 +486,16 @@
         ]
       },
       "evidence-gated": {
-        "solved": false,
-        "cost": 2880,
+        "solved": true,
+        "cost": 4000,
         "escaped": false,
         "actions": [
           "READ",
           "ACT",
           "TEST",
           "ACT",
-          "ACT",
+          "TEST",
+          "VERIFY",
           "STOP"
         ]
       },
@@ -506,7 +510,7 @@
       "actionEvidenceGated": "TEST",
       "outcomeDivergence": {
         "solvedBy": "verify-always",
-        "costGap": 2680
+        "costGap": 1560
       },
       "firstUnrecoverableStep": {
         "verify-always": {
@@ -544,13 +548,14 @@
       },
       "evidence-gated": {
         "solved": true,
-        "cost": 2380,
+        "cost": 3280,
         "escaped": false,
         "actions": [
           "READ",
           "ACT",
           "TEST",
           "ACT",
+          "VERIFY",
           "STOP"
         ]
       },
@@ -565,7 +570,7 @@
       "actionEvidenceGated": "TEST",
       "outcomeDivergence": {
         "solvedBy": "verify-always",
-        "costGap": 1680
+        "costGap": 780
       },
       "firstUnrecoverableStep": {
         "verify-always": {
@@ -587,7 +592,7 @@
     {
       "task": "C-m7-3-four-candidates",
       "family": "C-competing-hypotheses",
-      "reason": "different success",
+      "reason": "cost gap of at least 10%",
       "verify-always": {
         "solved": true,
         "cost": 4260,
@@ -602,16 +607,16 @@
         ]
       },
       "evidence-gated": {
-        "solved": false,
-        "cost": 4680,
+        "solved": true,
+        "cost": 3600,
         "escaped": false,
         "actions": [
           "READ",
           "ACT",
           "TEST",
           "ACT",
-          "ACT",
-          "ACT",
+          "TEST",
+          "VERIFY",
           "STOP"
         ]
       },
@@ -626,7 +631,7 @@
       "actionEvidenceGated": "TEST",
       "outcomeDivergence": {
         "solvedBy": "verify-always",
-        "costGap": 420
+        "costGap": 660
       },
       "firstUnrecoverableStep": {
         "verify-always": {
@@ -641,132 +646,6 @@
           "applied": "m-skips-undefined",
           "stillAvailable": [
             "m-correct-merge"
-          ]
-        }
-      }
-    },
-    {
-      "task": "D-m7-1-prefix-parse",
-      "family": "D-misleading-local-signal",
-      "reason": "cost gap of at least 10%",
-      "verify-always": {
-        "solved": true,
-        "cost": 5760,
-        "escaped": false,
-        "actions": [
-          "READ",
-          "ACT",
-          "VERIFY",
-          "ACT",
-          "VERIFY",
-          "ACT",
-          "VERIFY",
-          "STOP"
-        ]
-      },
-      "evidence-gated": {
-        "solved": true,
-        "cost": 4080,
-        "escaped": false,
-        "actions": [
-          "READ",
-          "ACT",
-          "TEST",
-          "VERIFY",
-          "ACT",
-          "ACT",
-          "STOP"
-        ]
-      },
-      "firstDivergenceStep": 3,
-      "stateBeforeDivergence": {
-        "evidence": "no-evidence",
-        "editsApplied": 1,
-        "pendingEdits": 1,
-        "pendingAttempts": 1
-      },
-      "actionVerifyAlways": "VERIFY",
-      "actionEvidenceGated": "TEST",
-      "outcomeDivergence": {
-        "solvedBy": "verify-always",
-        "costGap": 1680
-      },
-      "firstUnrecoverableStep": {
-        "verify-always": {
-          "step": 2,
-          "applied": "m-loose-parse",
-          "stillAvailable": [
-            "m-strict-digits"
-          ]
-        },
-        "evidence-gated": {
-          "step": 2,
-          "applied": "m-loose-parse",
-          "stillAvailable": [
-            "m-strict-digits"
-          ]
-        }
-      }
-    },
-    {
-      "task": "D-m7-3-empty-on-error",
-      "family": "D-misleading-local-signal",
-      "reason": "cost gap of at least 10%",
-      "verify-always": {
-        "solved": true,
-        "cost": 7660,
-        "escaped": false,
-        "actions": [
-          "READ",
-          "ACT",
-          "VERIFY",
-          "ACT",
-          "VERIFY",
-          "ACT",
-          "VERIFY",
-          "STOP"
-        ]
-      },
-      "evidence-gated": {
-        "solved": true,
-        "cost": 4780,
-        "escaped": false,
-        "actions": [
-          "READ",
-          "ACT",
-          "TEST",
-          "VERIFY",
-          "ACT",
-          "ACT",
-          "STOP"
-        ]
-      },
-      "firstDivergenceStep": 3,
-      "stateBeforeDivergence": {
-        "evidence": "no-evidence",
-        "editsApplied": 1,
-        "pendingEdits": 1,
-        "pendingAttempts": 1
-      },
-      "actionVerifyAlways": "VERIFY",
-      "actionEvidenceGated": "TEST",
-      "outcomeDivergence": {
-        "solvedBy": "verify-always",
-        "costGap": 2880
-      },
-      "firstUnrecoverableStep": {
-        "verify-always": {
-          "step": 2,
-          "applied": "m-catch-empty",
-          "stillAvailable": [
-            "m-null-on-error"
-          ]
-        },
-        "evidence-gated": {
-          "step": 2,
-          "applied": "m-catch-empty",
-          "stillAvailable": [
-            "m-null-on-error"
           ]
         }
       }
@@ -792,14 +671,16 @@
       },
       "evidence-gated": {
         "solved": true,
-        "cost": 3580,
+        "cost": 6700,
         "escaped": false,
         "actions": [
           "READ",
           "ACT",
           "TEST",
           "ACT",
+          "TEST",
           "ACT",
+          "VERIFY",
           "STOP"
         ]
       },
@@ -814,7 +695,7 @@
       "actionEvidenceGated": "TEST",
       "outcomeDivergence": {
         "solvedBy": "verify-always",
-        "costGap": 8880
+        "costGap": 5760
       },
       "firstUnrecoverableStep": {
         "verify-always": {
@@ -851,15 +732,17 @@
       },
       "evidence-gated": {
         "solved": true,
-        "cost": 3810,
+        "cost": 39960,
         "escaped": false,
         "actions": [
           "READ",
           "ACT",
           "TEST",
           "ACT",
+          "TEST",
+          "VERIFY",
           "ACT",
-          "STOP"
+          "VERIFY"
         ]
       },
       "firstDivergenceStep": 3,
@@ -873,7 +756,7 @@
       "actionEvidenceGated": "TEST",
       "outcomeDivergence": {
         "solvedBy": "evidence-gated",
-        "costGap": 34450
+        "costGap": 1700
       },
       "firstUnrecoverableStep": {
         "verify-always": {
@@ -888,68 +771,6 @@
           "applied": "m-assign-both-ways",
           "stillAvailable": [
             "m-correct-defaults"
-          ]
-        }
-      }
-    },
-    {
-      "task": "F-m7-3-oracle-free",
-      "family": "F-cheap-verifier",
-      "reason": "cost gap of at least 10%",
-      "verify-always": {
-        "solved": true,
-        "cost": 3900,
-        "escaped": false,
-        "actions": [
-          "READ",
-          "ACT",
-          "VERIFY",
-          "ACT",
-          "VERIFY",
-          "ACT",
-          "VERIFY",
-          "STOP"
-        ]
-      },
-      "evidence-gated": {
-        "solved": true,
-        "cost": 3540,
-        "escaped": false,
-        "actions": [
-          "READ",
-          "ACT",
-          "TEST",
-          "ACT",
-          "ACT",
-          "STOP"
-        ]
-      },
-      "firstDivergenceStep": 3,
-      "stateBeforeDivergence": {
-        "evidence": "no-evidence",
-        "editsApplied": 1,
-        "pendingEdits": 1,
-        "pendingAttempts": 1
-      },
-      "actionVerifyAlways": "VERIFY",
-      "actionEvidenceGated": "TEST",
-      "outcomeDivergence": {
-        "solvedBy": "verify-always",
-        "costGap": 360
-      },
-      "firstUnrecoverableStep": {
-        "verify-always": {
-          "step": 2,
-          "applied": "m-trim-only",
-          "stillAvailable": [
-            "m-correct-normalize"
-          ]
-        },
-        "evidence-gated": {
-          "step": 2,
-          "applied": "m-trim-only",
-          "stillAvailable": [
-            "m-correct-normalize"
           ]
         }
       }
@@ -973,13 +794,14 @@
       },
       "evidence-gated": {
         "solved": true,
-        "cost": 2180,
+        "cost": 3080,
         "escaped": false,
         "actions": [
           "READ",
           "ACT",
           "TEST",
           "ACT",
+          "VERIFY",
           "STOP"
         ]
       },
@@ -994,7 +816,7 @@
       "actionEvidenceGated": "TEST",
       "outcomeDivergence": {
         "solvedBy": "verify-always",
-        "costGap": 1680
+        "costGap": 780
       },
       "firstUnrecoverableStep": {
         "verify-always": {
@@ -1034,14 +856,16 @@
       },
       "evidence-gated": {
         "solved": true,
-        "cost": 3680,
+        "cost": 5800,
         "escaped": false,
         "actions": [
           "READ",
           "ACT",
           "TEST",
           "ACT",
+          "TEST",
           "ACT",
+          "VERIFY",
           "STOP"
         ]
       },
@@ -1056,7 +880,7 @@
       "actionEvidenceGated": "TEST",
       "outcomeDivergence": {
         "solvedBy": "verify-always",
-        "costGap": 5880
+        "costGap": 3760
       },
       "firstUnrecoverableStep": {
         "verify-always": {
@@ -1071,66 +895,6 @@
           "applied": "m-shift-epsilon",
           "stillAvailable": [
             "m-correct-away-from-zero"
-          ]
-        }
-      }
-    },
-    {
-      "task": "H-m7-1-escape-10x-oracle",
-      "family": "H-high-risk",
-      "reason": "cost gap of at least 10%",
-      "verify-always": {
-        "solved": true,
-        "cost": 4660,
-        "escaped": false,
-        "actions": [
-          "READ",
-          "ACT",
-          "VERIFY",
-          "ACT",
-          "VERIFY",
-          "STOP"
-        ]
-      },
-      "evidence-gated": {
-        "solved": true,
-        "cost": 3580,
-        "escaped": false,
-        "actions": [
-          "READ",
-          "ACT",
-          "TEST",
-          "VERIFY",
-          "ACT",
-          "STOP"
-        ]
-      },
-      "firstDivergenceStep": 3,
-      "stateBeforeDivergence": {
-        "evidence": "no-evidence",
-        "editsApplied": 1,
-        "pendingEdits": 1,
-        "pendingAttempts": 1
-      },
-      "actionVerifyAlways": "VERIFY",
-      "actionEvidenceGated": "TEST",
-      "outcomeDivergence": {
-        "solvedBy": "verify-always",
-        "costGap": 1080
-      },
-      "firstUnrecoverableStep": {
-        "verify-always": {
-          "step": 2,
-          "applied": "m-absolute",
-          "stillAvailable": [
-            "m-correct-tax"
-          ]
-        },
-        "evidence-gated": {
-          "step": 2,
-          "applied": "m-absolute",
-          "stillAvailable": [
-            "m-correct-tax"
           ]
         }
       }
@@ -1138,7 +902,7 @@
     {
       "task": "H-m7-2-escape-40x-oracle",
       "family": "H-high-risk",
-      "reason": "different success",
+      "reason": "cost gap of at least 10%",
       "verify-always": {
         "solved": true,
         "cost": 4260,
@@ -1153,15 +917,16 @@
         ]
       },
       "evidence-gated": {
-        "solved": false,
-        "cost": 3680,
+        "solved": true,
+        "cost": 3600,
         "escaped": false,
         "actions": [
           "READ",
           "ACT",
           "TEST",
           "ACT",
-          "ACT",
+          "TEST",
+          "VERIFY",
           "STOP"
         ]
       },
@@ -1176,7 +941,7 @@
       "actionEvidenceGated": "TEST",
       "outcomeDivergence": {
         "solvedBy": "verify-always",
-        "costGap": 580
+        "costGap": 660
       },
       "firstUnrecoverableStep": {
         "verify-always": {
@@ -1191,69 +956,6 @@
           "applied": "m-shifts-now",
           "stillAvailable": [
             "m-correct-boundary"
-          ]
-        }
-      }
-    },
-    {
-      "task": "H-m7-3-escape-200x-oracle",
-      "family": "H-high-risk",
-      "reason": "cost gap of at least 10%",
-      "verify-always": {
-        "solved": true,
-        "cost": 5560,
-        "escaped": false,
-        "actions": [
-          "READ",
-          "ACT",
-          "VERIFY",
-          "ACT",
-          "VERIFY",
-          "ACT",
-          "VERIFY",
-          "STOP"
-        ]
-      },
-      "evidence-gated": {
-        "solved": true,
-        "cost": 4280,
-        "escaped": false,
-        "actions": [
-          "READ",
-          "ACT",
-          "TEST",
-          "VERIFY",
-          "ACT",
-          "ACT",
-          "STOP"
-        ]
-      },
-      "firstDivergenceStep": 3,
-      "stateBeforeDivergence": {
-        "evidence": "no-evidence",
-        "editsApplied": 1,
-        "pendingEdits": 1,
-        "pendingAttempts": 1
-      },
-      "actionVerifyAlways": "VERIFY",
-      "actionEvidenceGated": "TEST",
-      "outcomeDivergence": {
-        "solvedBy": "verify-always",
-        "costGap": 1280
-      },
-      "firstUnrecoverableStep": {
-        "verify-always": {
-          "step": 2,
-          "applied": "m-multiply-by-destination",
-          "stillAvailable": [
-            "m-correct-convert"
-          ]
-        },
-        "evidence-gated": {
-          "step": 2,
-          "applied": "m-multiply-by-destination",
-          "stillAvailable": [
-            "m-correct-convert"
           ]
         }
       }
@@ -1275,25 +977,25 @@
       "oracle": 1
     },
     "valve-v0": {
-      "solved": 3,
-      "escaped": 0,
-      "cost": 35740,
-      "cheap": 8,
-      "oracle": 12
+      "solved": 5,
+      "escaped": 3,
+      "cost": 20340,
+      "cheap": 41,
+      "oracle": 5
     },
     "risk-adjusted": {
-      "solved": 3,
+      "solved": 7,
       "escaped": 0,
-      "cost": 26760,
+      "cost": 31780,
       "cheap": 1,
-      "oracle": 8
+      "oracle": 17
     },
     "evidence-gated": {
-      "solved": 6,
+      "solved": 7,
       "escaped": 0,
-      "cost": 25700,
-      "cheap": 7,
-      "oracle": 8
+      "cost": 28320,
+      "cheap": 8,
+      "oracle": 11
     },
     "confidence-threshold": {
       "solved": 2,

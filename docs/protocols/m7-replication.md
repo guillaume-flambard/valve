@@ -99,6 +99,46 @@ b43aeeb665b01fd595ab3bace7dea6bd7f720f0934fad0a13f70630627610312  bench/cogbench
 8e0e0787b0351e01e378ed5a5beefb2617dd3cfc3c2a7548e5b0b588c3041395  bench/cogbench/src/tasks.ts
 ```
 
+### AMENDMENT, 2026-09-28, after the run: `runner.ts` freeze BROKEN and superseded
+
+**`runner.ts` was frozen at `b43aeeb6…` above. The freeze was broken after the run and the file no longer
+hashes to it. The result was re-measured on the corrected harness. The line above is left as it was written
+before the corpus existed, because ADR 0005 still cites `b43aeeb6…` as the freeze that was verified
+restored during diagnosis, and a reader of that ADR deserves to be able to see what it was citing.**
+
+The current file, which is what every number in `results.json` was produced by:
+
+```
+5e08ae3c82c1b1c65bb4529ed1e2c3339be9de31dcd3b455b6e7d9d8ddf8daa6  bench/cogbench/src/runner.ts
+```
+
+**What changed.** One line, plus the comment that states why. The ACT case already cleared
+`lastTestExit` and `lastVerifyExit` on an edit. It did not clear `state.verification.tests`, which is the
+copy of the same fact that `evidenceOf()` falls through to and that every gated policy actually reads. A
+red observed on a state that an edit has since destroyed survived into the next decision.
+
+**Why the freeze was broken rather than the result withdrawn.** The freeze exists to stop a policy being
+fitted to a benchmark. A harness that hands a policy a refutation about a deleted state is not a benchmark
+question, it is a harness bug, and preserving a known-wrong measurement to protect a nicer number would
+defeat the purpose of the project. The project refused that trade twice already, in ADR 0003 and ADR 0004.
+
+**Under whose decision.** ADR 0005 took it: option 1 of three, "fix and re-measure", written out as the
+recommendation there and adopted here. The cost, stated in ADR 0005 before it was paid, was four pinned
+numbers in `experiments/m6.test.mjs`, the `risk-adjusted` 3/8 result in ADR 0004, and this document's
+letter. All three are amended, and the deviation is recorded in the tests that pin the numbers, not only
+here, per ADR 0004.
+
+**What was NOT touched.** `policies.ts`, `policies-m6.ts` and `tasks.ts` still hash to exactly the values
+above. The policies and the corpus are byte-identical, so the comparison the protocol fixed is the
+comparison that was re-measured.
+
+**The primary comparison is uncontaminated by a second defect this exposed.** Removing the stale latch
+revealed that `valve-v0` has no cheap-green terminal condition and will re-run an identical green cheap test
+until its step budget runs out. On the 24 that is 19 of 24 tasks for `valve-v0`, and 6 of 24 for
+`risk-adjusted`. It touches neither primary policy: `verify-always` and `evidence-gated` both peak at a
+run of 2 identical checks, on 0 tasks. That is why the letter below can be re-issued at all, and it is
+recorded as an open decision in ADR 0005 rather than resolved here.
+
 `runner.ts` and `tasks.ts` are frozen as well, which is a stronger claim than M6 made. The reason is
 below, and it is not hypothetical: the replication found a harness defect, and a harness that can move
 under a result is not a harness the result can be attributed to.
@@ -110,6 +150,12 @@ under a result is not a harness the result can be attributed to.
 | `test-always` | control: what trusting the cheap channel costs |
 | `valve-v0` | control: the falsified predecessor |
 | `risk-adjusted` | control: the policy the thesis predicts, recorded at 3/8 |
+
+The `3/8` above is what ADR 0004 recorded on the 8-task development corpus before this protocol existed. It
+is **withdrawn**: ADR 0005 found it to be an artefact of the stale latch, and the same policy solves 7 of
+8 development tasks and 24 of 24 unseen ones on the corrected harness. The withdrawal is recorded in ADR
+0004 and ADR 0005, not silently edited out of the line above, for the same reason the `b43aeeb6…` hash is
+still here.
 | `confidence-threshold`, `oracle-budgeted` | controls, reported but not compared on |
 
 The M6 development result is reported in the same table, marked as the corpus it
@@ -218,3 +264,14 @@ node experiments/m7-replication.mjs
 `npm test` runs `experiments/m7-replication.test.mjs`, which checks the freeze, the
 corpus balance, the fixture sweep and the four-way outcome against the recorded
 result. `m7-replication.mjs` prints the per-policy table and the divergence records.
+
+It also calls `buildResults()` and compares the whole recorded object against a fresh run, field by field,
+so the artefact cannot drift away from the harness without the test saying so. That check was missing
+while the stale latch was in the runner, and it is the reason the recorded `18/24` at 71,260 survived three
+corrections of the measured table without anything failing.
+
+**The re-measured letter is Strong positive**: `evidence-gated` escaped nothing, solved 21 against 20, and
+cost 125,730 against 140,400. The letter this protocol first received, on the frozen harness, was
+Efficiency tradeoff at 18 against 20. Both letters, and why the second supersedes the first, are in
+ADR 0005. The four outcomes above are unchanged: the corrected run was scored by the same pre-registered
+order, and it is that order rather than the outcome which was frozen.

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { BenchEnvironment } from "../bench/cogbench/dist/environment.js"
@@ -18,8 +18,12 @@ import { replicationTasks } from "../bench/cogbench/dist/tasks-m7.js"
  * are tested in. This file applies that order rather than choosing one, which is the whole reason the
  * order was written down before the numbers existed.
  *
- * Writes `experiments/m7-replication/results.json` and prints the human table. The test re-runs this and
- * fails if the recorded result is not what a fresh run produces.
+ * Writes `experiments/m7-replication/results.json` and prints the human table.
+ *
+ * The result object is built by `buildResults()` and written only when this file is run as a program, so
+ * `m7-replication.test.mjs` can import the builder, run it, and fail if the committed JSON is not what a
+ * fresh run produces. That sentence used to be an aspiration: the test only ever compared the file against
+ * itself, so it stayed green while the harness moved underneath the recorded numbers.
  */
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..")
@@ -189,122 +193,129 @@ const divergenceRecords = (rows, correctByTask) => {
   return records
 }
 
-const rows = runOn(replicationTasks)
-const developmentRows = runOn(developmentTasks)
+export function buildResults() {
+  // The whole record is assembled here and nowhere else. `m7-replication.mjs` used to build it at module
+  // scope and only write it at the end, which left the recorded artefact unconnected to any measurement:
+  // the test could check the file against itself and would pass no matter what the harness did. Exporting
+  // the builder is what makes the claim in the header true, because a test can now call it and compare the
+  // result against the committed JSON field by field.
+  const rows = runOn(replicationTasks)
+  const developmentRows = runOn(developmentTasks)
 
-const wins = utilityWins(rows.map(({ task, episode }) => ({ ...episode, taskId: task.id })))
-const correctByTask = Object.fromEntries(replicationTasks.map((t) => [t.id, correctMutationIds(t)]))
+  const wins = utilityWins(rows.map(({ task, episode }) => ({ ...episode, taskId: task.id })))
+  const correctByTask = Object.fromEntries(replicationTasks.map((t) => [t.id, correctMutationIds(t)]))
 
-const table = POLICY_ORDER.map((policy) => {
-  const own = rows.filter((r) => r.episode.policy === policy)
-  return { policy, ...summarise(own), bestUtilityOn: wins[policy] ?? 0, actions: actionDistribution(own) }
-})
+  const table = POLICY_ORDER.map((policy) => {
+    const own = rows.filter((r) => r.episode.policy === policy)
+    return { policy, ...summarise(own), bestUtilityOn: wins[policy] ?? 0, actions: actionDistribution(own) }
+  })
 
-const of = (policy) => table.find((r) => r.policy === policy)
-const a = of(PRIMARY_A)
-const b = of(PRIMARY_B)
+  const of = (policy) => table.find((r) => r.policy === policy)
+  const a = of(PRIMARY_A)
+  const b = of(PRIMARY_B)
 
-// The order is fixed by the protocol and is not the flattering order. A safety failure is reported as one
-// even when the cost is better and the solved count is equal, because that is the only ordering that does
-// not let a cheap result buy a safety claim.
-const divergenceCount = divergenceRecords(rows, correctByTask).length
-const { outcome, reason } = (() => {
-  if (b.escaped > 0 && a.escaped === 0) {
-    return {
-      outcome: "Safety failure",
-      reason: `${PRIMARY_B} escaped ${b.escaped} defect(s) that ${PRIMARY_A} caught. Nothing else in this row matters.`,
+  // The order is fixed by the protocol and is not the flattering order. A safety failure is reported as one
+  // even when the cost is better and the solved count is equal, because that is the only ordering that does
+  // not let a cheap result buy a safety claim.
+  const divergenceCount = divergenceRecords(rows, correctByTask).length
+  const { outcome, reason } = (() => {
+    if (b.escaped > 0 && a.escaped === 0) {
+      return {
+        outcome: "Safety failure",
+        reason: `${PRIMARY_B} escaped ${b.escaped} defect(s) that ${PRIMARY_A} caught. Nothing else in this row matters.`,
+      }
     }
-  }
-  if (b.escaped === 0 && b.solved >= a.solved && b.cost < a.cost) {
-    return {
-      outcome: "Strong positive",
-      reason: `${PRIMARY_B} escaped nothing, solved ${b.solved} against ${a.solved}, and cost ${b.cost} against ${a.cost}.`,
+    if (b.escaped === 0 && b.solved >= a.solved && b.cost < a.cost) {
+      return {
+        outcome: "Strong positive",
+        reason: `${PRIMARY_B} escaped nothing, solved ${b.solved} against ${a.solved}, and cost ${b.cost} against ${a.cost}.`,
+      }
     }
-  }
-  if (b.escaped === 0 && b.cost < a.cost && b.solved < a.solved) {
-    return {
-      outcome: "Efficiency tradeoff",
-      reason: `${PRIMARY_B} escaped nothing and cost ${b.cost} against ${a.cost}, but solved ${b.solved} against ${a.solved}.`,
+    if (b.escaped === 0 && b.cost < a.cost && b.solved < a.solved) {
+      return {
+        outcome: "Efficiency tradeoff",
+        reason: `${PRIMARY_B} escaped nothing and cost ${b.cost} against ${a.cost}, but solved ${b.solved} against ${a.solved}.`,
+      }
     }
-  }
-  if (divergenceCount === 0) {
-    return {
-      outcome: "Uninformative",
-      reason: `the two policies agree on every task, on both success and cost, so this corpus failed to discriminate. That is a statement about the corpus.`,
+    if (divergenceCount === 0) {
+      return {
+        outcome: "Uninformative",
+        reason: `the two policies agree on every task, on both success and cost, so this corpus failed to discriminate. That is a statement about the corpus.`,
+      }
     }
+    return {
+      outcome: "No advantage",
+      reason: `${PRIMARY_B} solved ${b.solved} against ${a.solved} at a cost of ${b.cost} against ${a.cost}, which clears no bar in the protocol.`,
+    }
+  })()
+
+  const familyBreakdown = Object.fromEntries(
+    [...new Set(replicationTasks.map((t) => t.family))].map((family) => {
+      const own = rows.filter((r) => r.task.family === family)
+      return [family, Object.fromEntries(POLICY_ORDER.map((p) => [p, summarise(own.filter((r) => r.episode.policy === p)).solved]))]
+    }),
+  )
+
+  const positionOfFirstCorrect = Object.fromEntries(
+    Object.entries(correctByTask).map(([id, correct]) => [id, correct.length ? task_index(id, correct[0]) : null]),
+  )
+  function task_index(taskId, mutationId) {
+    const task = replicationTasks.find((t) => t.id === taskId)
+    return task.mutations.findIndex((m) => m.id === mutationId) + 1
   }
-  return {
-    outcome: "No advantage",
-    reason: `${PRIMARY_B} solved ${b.solved} against ${a.solved} at a cost of ${b.cost} against ${a.cost}, which clears no bar in the protocol.`,
+  const positionHistogram = {}
+  for (const position of Object.values(positionOfFirstCorrect)) {
+    if (position === null) continue
+    positionHistogram[position] = (positionHistogram[position] ?? 0) + 1
   }
-})()
 
-const familyBreakdown = Object.fromEntries(
-  [...new Set(replicationTasks.map((t) => t.family))].map((family) => {
-    const own = rows.filter((r) => r.task.family === family)
-    return [family, Object.fromEntries(POLICY_ORDER.map((p) => [p, summarise(own.filter((r) => r.episode.policy === p)).solved]))]
-  }),
-)
-
-const positionOfFirstCorrect = Object.fromEntries(
-  Object.entries(correctByTask).map(([id, correct]) => [id, correct.length ? task_index(id, correct[0]) : null]),
-)
-function task_index(taskId, mutationId) {
-  const task = replicationTasks.find((t) => t.id === taskId)
-  return task.mutations.findIndex((m) => m.id === mutationId) + 1
-}
-const positionHistogram = {}
-for (const position of Object.values(positionOfFirstCorrect)) {
-  if (position === null) continue
-  positionHistogram[position] = (positionHistogram[position] ?? 0) + 1
-}
-
-const results = {
-  schema: "valve-m7-replication/v1",
-  protocol: "docs/protocols/m7-replication.md",
-  authorConfound:
-    "the author of these 24 fixtures has read all four M6 policies, so this is not a blind replication. " +
-    "It is the largest weakness of the result and nothing in the corpus removes it.",
-  frozen: Object.fromEntries(FROZEN.map((path) => [path, sha256(path)])),
-  corpus: {
-    tasks: replicationTasks.length,
-    families: Object.fromEntries(
-      [...new Set(replicationTasks.map((t) => t.family))].map((f) => [f, replicationTasks.filter((t) => t.family === f).length]),
+  const results = {
+    schema: "valve-m7-replication/v1",
+    protocol: "docs/protocols/m7-replication.md",
+    authorConfound:
+      "the author of these 24 fixtures has read all four M6 policies, so this is not a blind replication. " +
+      "It is the largest weakness of the result and nothing in the corpus removes it.",
+    frozen: Object.fromEntries(FROZEN.map((path) => [path, sha256(path)])),
+    corpus: {
+      tasks: replicationTasks.length,
+      families: Object.fromEntries(
+        [...new Set(replicationTasks.map((t) => t.family))].map((f) => [f, replicationTasks.filter((t) => t.family === f).length]),
+      ),
+      distinctFromDevelopmentCorpus: replicationTasks.every((t) => !developmentTasks.some((d) => d.id === t.id)),
+      firstCorrectEditPosition: positionHistogram,
+      tasksWhereAWrongFixPassesTheLocalTest: Object.values(correctByTask).length,
+    },
+    table,
+    familyBreakdown,
+    primary: { safetyReference: PRIMARY_A, m6Leader: PRIMARY_B },
+    outcome: { name: outcome, reason },
+    divergences: divergenceRecords(rows, correctByTask),
+    m6DevelopmentCorpus: Object.fromEntries(
+      POLICY_ORDER.map((p) => [
+        p,
+        (() => {
+          const s = summarise(developmentRows.filter((r) => r.episode.policy === p))
+          return { solved: s.solved, escaped: s.escaped, cost: s.cost, cheap: s.cheap, oracle: s.oracle }
+        })(),
+      ]),
     ),
-    distinctFromDevelopmentCorpus: replicationTasks.every((t) => !developmentTasks.some((d) => d.id === t.id)),
-    firstCorrectEditPosition: positionHistogram,
-    tasksWhereAWrongFixPassesTheLocalTest: Object.values(correctByTask).length,
-  },
-  table,
-  familyBreakdown,
-  primary: { safetyReference: PRIMARY_A, m6Leader: PRIMARY_B },
-  outcome: { name: outcome, reason },
-  divergences: divergenceRecords(rows, correctByTask),
-  m6DevelopmentCorpus: Object.fromEntries(
-    POLICY_ORDER.map((p) => [
-      p,
-      (() => {
-        const s = summarise(developmentRows.filter((r) => r.episode.policy === p))
-        return { solved: s.solved, escaped: s.escaped, cost: s.cost, cheap: s.cheap, oracle: s.oracle }
-      })(),
-    ]),
-  ),
-  notMeasured: [
-    "retrieval: a capsule is handed to the planner, so discovery is not exercised here either",
-    "no task where the correct edit has to be composed from two edits rather than chosen from a list",
-    "no real agent: every candidate edit is scripted, so this measures a gate over a short list and not a policy over open-ended work",
-    "utility is compared only within a task, because each task prices success and defect escape differently",
-  ],
+    notMeasured: [
+      "retrieval: a capsule is handed to the planner, so discovery is not exercised here either",
+      "no task where the correct edit has to be composed from two edits rather than chosen from a list",
+      "no real agent: every candidate edit is scripted, so this measures a gate over a short list and not a policy over open-ended work",
+      "utility is compared only within a task, because each task prices success and defect escape differently",
+    ],
+  }
+
+  return results
 }
 
-mkdirSync(OUT, { recursive: true })
-writeFileSync(join(OUT, "results.json"), `${JSON.stringify(results, null, 2)}\n`)
-
-if (process.argv.includes("--json")) {
-  console.log(JSON.stringify(results, null, 2))
-} else {
+const printTable = (results) => {
   const num = (n) => n.toLocaleString("en-US")
-  console.log(`M7 replication  ${replicationTasks.length} unseen tasks, 3 per family, 8 families\n`)
+  const table = results.table
+  const a = table.find((r) => r.policy === PRIMARY_A)
+  const b = table.find((r) => r.policy === PRIMARY_B)
+  console.log(`M7 replication  ${results.corpus.tasks} unseen tasks, 3 per family, 8 families\n`)
   console.log("success = full oracle exit 0.  escaped = the policy believed a cheap green and the oracle disagreed.\n")
   const head = ["policy", "solved", "escaped", "cheap", "oracle", "edits", "cost", "best-on"]
   const widths = [22, 8, 8, 7, 8, 7, 11, 8]
@@ -324,10 +335,22 @@ if (process.argv.includes("--json")) {
       ].join(""),
     )
   }
-  console.log(`\nOUTCOME: ${outcome}\n${reason}\n`)
+  console.log(`\nOUTCOME: ${results.outcome.name}\n${results.outcome.reason}\n`)
   console.log(`primary comparison: ${PRIMARY_B} (${b.solved}/${b.tasks}, ${num(b.cost)}) against ${PRIMARY_A} (${a.solved}/${a.tasks}, ${num(a.cost)})`)
   console.log(`divergence records: ${results.divergences.length}`)
   console.log(`\nwrote ${join(OUT, "results.json")}`)
   console.log("\nCaveat: the fixtures were written by somebody who had read the policies, so this is a")
   console.log("replication and not a blind test. A blind corpus has to be built by someone else.")
 }
+
+const main = () => {
+  const results = buildResults()
+  mkdirSync(OUT, { recursive: true })
+  writeFileSync(join(OUT, "results.json"), `${JSON.stringify(results, null, 2)}\n`)
+  if (process.argv.includes("--json")) console.log(JSON.stringify(results, null, 2))
+  else printTable(results)
+}
+
+// Only write and print when run as a program. A test that imports `buildResults` must not be the thing
+// that regenerates the artefact it is checking, or the comparison would be a tautology.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main()

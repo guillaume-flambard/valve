@@ -130,6 +130,26 @@ test("the safety bound is unchanged by M6", () => {
 })
 
 test("the M6 result, stated so it cannot be quietly improved", () => {
+  /**
+   * DEVIATION, recorded here rather than only in the ADR, per ADR 0004: "The deviation is recorded in the
+   * test that pins the numbers rather than only here, so anyone reading the pin sees it."
+   *
+   * M7 found a second copy of the fact ADR 0004 already cleared once. An edit invalidated
+   * `lastTestExit` and `lastVerifyExit` but not `state.verification.tests`, which is the copy the gated
+   * policies read. ADR 0005 measured the contamination and took the decision to fix and re-measure.
+   *
+   * What moved on the 8 development tasks, all measured after the fix:
+   *
+   *   policy            before                    after
+   *   verify-always     7 / 27,500 / 0 escaped   7 / 27,500 / 0 escaped     UNCHANGED
+   *   evidence-gated    6 / 25,700 / 0 escaped   7 / 28,320 / 0 escaped
+   *   risk-adjusted     3 / 26,760 / 0 escaped   7 / 31,780 / 0 escaped
+   *   valve-v0          3 / 35,740 / 0 escaped   5 / 20,340 / 3 escaped
+   *   test-always       4 / 10,180 / 3 escaped   4 / 10,180 / 3 escaped     UNCHANGED
+   *
+   * `verify-always` is unchanged because it never reads `state.verification` in its decision path, which is
+   * why one column of this table is provably untouched and why this is not a blanket re-baseline.
+   */
   const run = (id) => {
     const policy = POLICIES[id]
     if (!policy) throw new Error(`missing policy ${id}`)
@@ -149,9 +169,9 @@ test("the M6 result, stated so it cannot be quietly improved", () => {
   const v0 = run("valve-v0")
   const gated = run("evidence-gated")
 
-  // The historical claim survives: V0 remains dominated.
+  // Dominance on success survives, measured, and is asserted rather than assumed.
   assert.ok(v0.solved <= safety.solved, "V0 still solves no more than the safety bound")
-  assert.ok(v0.cost >= safety.cost, "V0 still costs no less than the safety bound")
+  assert.ok(v0.solved < safety.solved, "and is strictly worse on success")
 
   // The M6 claim, which is weaker and must be stated accurately.
   assert.ok(
@@ -159,9 +179,30 @@ test("the M6 result, stated so it cannot be quietly improved", () => {
     `evidence-gated must beat V0 on success (${gated.solved} vs ${v0.solved})`,
   )
   assert.equal(gated.escaped, 0, "and ship no defects")
+
+  // The M6 reasoning, carried forward with measured numbers. ADR 0004 refused to call a match on success
+  // bought at a higher cost a Pareto improvement, and that reasoning is unchanged; only the numbers are.
+  // M6: 6/8 at 1,800 UNDER the safety bound. Now: 7/8 at 820 OVER it. Pinned because if evidence-gated ever
+  // becomes cheaper again, that is the moment the M6 claim has to be re-examined rather than inherited.
   assert.ok(
-    gated.solved < safety.solved,
-    `evidence-gated does NOT yet match the safety bound (${gated.solved} vs ${safety.solved}). ` +
-      `If this assertion is removed, the headline claim must change with it.`,
+    gated.cost > safety.cost,
+    `evidence-gated meets the safety bound on success but costs more than it ` +
+      `(${gated.cost} vs ${safety.cost}), which is not a Pareto improvement`,
   )
+
+  // WITHDRAWN, 2026-09-28, and the two withdrawals are not the same kind of withdrawal.
+  //
+  // 1. `v0.cost >= safety.cost` is gone because it is false. V0 is now 20,340 against 27,500: it became
+  //    cheaper, because it no longer stops on a stale red and therefore no longer pays for the edits it
+  //    used to make after the red. It is not replaced by the opposite assertion, because "cheaper" on its
+  //    own is the flattering half of a claim whose unflattering half is 3 escaped defects, and this file
+  //    has no standing to assert that trade on its own. It is ADR 0005's open decision.
+  //
+  // 2. `gated.solved < safety.solved` is gone because it is false, and the assertion said itself what
+  //    happens when it is: "If this assertion is removed, the headline claim must change with it." It has.
+  //    evidence-gated is 7/8 against the safety bound's 7/8. The M6 headline that it "does not meet the
+  //    bar" is withdrawn in ADR 0004, and what replaces it is that it reaches the bar at 28,320 against
+  //    27,500, which is 820 MORE rather than the 1,800 less ADR 0004 recorded. Meeting the bar on success
+  //    while costing more is a different claim from the one M6 made, and ADR 0004 says so rather than this
+  //    test quietly inheriting a stronger one.
 })

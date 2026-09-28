@@ -197,16 +197,28 @@ test("criterion 5: an unverified delta is visible in the state", () => {
   assert.equal(hasUnverifiedDelta({ verifiedCheckpoint: "a", currentCheckpoint: "b" }), true)
 
   // The bench must actually reach a state where the world moved unchecked.
+  //
+  // WITNESS CHANGED 2026-09-28, and the reason is worth keeping. This used to use `valve-v0`, which
+  // stopped being a witness the moment the stale latch was cleared from `state.verification.tests`: V0
+  // used to leave an unjudged attempt only because it was stopping on a refutation recorded against a
+  // state an edit had already destroyed. On the corrected harness its single attempt on this task comes
+  // back `supported`, because it now runs the cheap test after the edit. That is the fix working.
+  //
+  // `naive-edit-first` witnesses the same property for the reason the property exists: it edits until the
+  // edits run out and never checks, so it necessarily leaves the world moved and unchecked. Measured, not
+  // assumed: it is one of 16 policy/task pairs on this corpus that still produce a pending or
+  // unattributable attempt, and all 16 are policies that never verify.
   let sawUnverified = false
   const task = task0()
+  const witness = "naive-edit-first"
   runEpisode({
     task,
-    policy: POLICIES["valve-v0"],
-    policyId: "valve-v0",
+    policy: POLICIES[witness],
+    policyId: witness,
     onAttempts: () => {},
   })
   // Re-derive from the stored corpus instead of trusting the policy.
-  const collected = runCollecting(task, "valve-v0")
+  const collected = runCollecting(task, witness)
   assert.ok(collected.attempts.length > 0, "attempts were produced")
   assert.ok(
     collected.attempts.some((a) => a.verdict === "pending") ||
@@ -474,22 +486,31 @@ test("the contrast the milestone exists to expose is real", () => {
  * these numbers drift, a policy changed, and the milestone boundary was
  * crossed silently.
  *
- * DEVIATION, recorded rather than hidden. M6 immediately surfaced a runner bug:
- * a refutation was carried across an edit, so a policy could treat an already
- * refuted state as still refuted and overwrite its own best attempt. The fix
- * clears evidence when the world moves, which is correct, and it moved the
- * baselines: verify-always went from 25,100 to 27,500 and valve-v0 from 27,920
+ * DEVIATION, recorded rather than hidden. There have now been TWO runner changes under this freeze, and
+ * both are recorded here because a reader of the pin has to see that the harness moved.
+ *
+ * First, M6: a refutation was carried across an edit, so a policy could treat an already refuted state as
+ * still refuted and overwrite its own best attempt. The fix clears evidence when the world moves, which is
+ * correct, and it moved the baselines: verify-always went from 25,100 to 27,500 and valve-v0 from 27,920
  * to 35,740. The tasks and the cost model were NOT touched.
  *
- * The freeze exists to stop a policy being fitted to the benchmark. A state
- * tracking bug in the harness is not that, and leaving a known-wrong
- * measurement in place to protect a nicer number would defeat the purpose of
- * the whole project. The cost of the freeze is being paid here, visibly.
+ * Second, M7: the same fact was stored a third time, in `state.verification.tests`, which the fix beside
+ * it did not clear, and that copy is the one the gated policies actually read. ADR 0005 measured the
+ * contamination and took the decision to fix and re-measure. valve-v0 moved again, and this time the move
+ * is not flattering: 3 solved / 35,740 / 0 escaped became 5 solved / 20,340 / 3 escaped. It is cheaper
+ * because it no longer stops on a stale red, and it ships three defects that the stale red was hiding. The
+ * M6 numbers it is not measured against, verify-always at 7 / 27,500 / 0, are unchanged, and neither are
+ * test-always, naive-edit-first, act-always or stop-immediately: a re-baseline that touched every policy
+ * would be a different project from this one.
+ *
+ * The freeze exists to stop a policy being fitted to the benchmark. A state tracking bug in the harness is
+ * not that, and leaving a known-wrong measurement in place to protect a nicer number would defeat the
+ * purpose of the whole project. The cost of the freeze is being paid here, visibly, twice.
  */
 const FROZEN_FAMILY_BENCH = {
   "verify-always": { solved: 7, cost: 27500, escaped: 0 },
   "test-always": { solved: 4, cost: 10180, escaped: 3 },
-  "valve-v0": { solved: 3, cost: 35740, escaped: 0 },
+  "valve-v0": { solved: 5, cost: 20340, escaped: 3 },
   "naive-edit-first": { solved: 2, cost: 15900, escaped: 0 },
   "act-always": { solved: 2, cost: 15900, escaped: 0 },
   "stop-immediately": { solved: 1, cost: 0, escaped: 0 },
@@ -517,18 +538,27 @@ test("criterion 8: M5 changed the benchmark, not the policies", () => {
 /**
  * The result the expanded benchmark produces, stated so it cannot be quietly
  * improved away: V0 is dominated on both axes at once, by the safety baseline.
+ *
+ * REVISED 2026-09-28, and the revision is not in V0's favour. Measured against
+ * the corrected runner, V0 is 5/8 at 20,340 against the baseline's 7/8 at
+ * 27,500, so it is still dominated on success and is now CHEAPER. The
+ * "no less on cost" assertion is gone because it is false, and it is not
+ * replaced by "and cheaper, so it is now competitive", because that would be a
+ * claim about escapedDefect that this file has no standing to make on its own.
+ * The three escapes are pinned in FROZEN_FAMILY_BENCH above, where a reader
+ * meets them next to the cost. Whether V0 being cheaper and less safe is still
+ * domination, or a different claim about the thesis, is ADR 0005's open
+ * decision and not this test's to settle.
  */
-test("the expanded benchmark still finds V0 dominated", () => {
+test("the expanded benchmark still finds V0 dominated on success", () => {
   const run = (id) => {
     const policy = POLICIES[id]
     let solved = 0
-    let cost = 0
     for (const task of tasks) {
       const ep = runEpisode({ task, policy, policyId: id })
       if (ep.success) solved++
-      cost += ep.totalCostTokens
     }
-    return { solved, cost }
+    return { solved }
   }
   const safety = run("verify-always")
   const v0 = run("valve-v0")
@@ -537,11 +567,7 @@ test("the expanded benchmark still finds V0 dominated", () => {
     "V0 solves no more than the safety baseline",
   )
   assert.ok(
-    v0.cost >= safety.cost,
-    "V0 costs no less than the safety baseline",
-  )
-  assert.ok(
-    v0.solved < safety.solved || v0.cost > safety.cost,
-    "and is strictly worse on at least one axis",
+    v0.solved < safety.solved,
+    "and is strictly worse on success",
   )
 })

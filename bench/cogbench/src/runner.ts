@@ -248,10 +248,16 @@ export function runEpisode(options: RunOptions): BenchEpisode {
         // describes the state it was observed on, and after an edit that state
         // no longer exists. Keeping it let a policy carry "already refuted"
         // across an edit and overwrite its own best attempt with the next one.
+        //
+        // The same argument applies to `verification`, which is the field the
+        // gated policies actually read rather than the locals beside it. M7
+        // found three of 24 episodes ending on a state nothing had examined
+        // because this one field outlived the edit that destroyed its subject.
         believedPassing = false
         believedOnCheapEvidence = false
         lastTestExit = undefined
         lastVerifyExit = undefined
+        verification = { ...verification, tests: "unknown" }
         break
       }
       case "TEST": {
